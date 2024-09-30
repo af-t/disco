@@ -1,0 +1,33 @@
+{
+  "name": "disco",
+  "version": "1.0.0",
+  "description": "Discord bot application.",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/af-t/disco.git"
+  },
+  "keywords": [
+    "bot",
+    "bot-framework",
+    "discord",
+    "api",
+    "discord-bot",
+    "discord-api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/af-t/disco/issues"
+  },
+  "homepage": "https://github.com/af-t/disco#readme",
+  "dependencies": {
+    "@google/generative-ai": "^0.20.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+    "shard": [ 0, 1 ],
+    "prefix": ".",
+    "token": "",
+    "gemini": {
+        "sessionDuration": 21600,
+        "token": "",
+        "name": "Acheron"
+    }
+}
