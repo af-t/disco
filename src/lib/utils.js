@@ -92,7 +92,10 @@ const loadCommands = (exports, path) => {
 
     for (let i = 0; i < listFiles.length; i++) {
         const command = { data: null, execute: null };
-        const execute = (...args) => (command.execute && command.execute(...args));
+        const execute = (...args) => {
+            simple_logger.debug(`Executed command: ${command.data.name}`);
+            (command.execute && command.execute(...args));
+        };
         importCommand(command, listFiles[i]);
 
         const copy2Execute = () => {

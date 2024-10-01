@@ -4,11 +4,11 @@ const { join } = require("path");
 
 require("dotenv").config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? global.config?.gemini?.token);
+const genAI = new GoogleGenerativeAI(global.gemini_token ?? process.env.GEMINI_TOKEN ?? global.config?.gemini?.token);
 const pro = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 const flash = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-if (!genAI.apiKey) console.warn("Gemini API Key not found");
+if (!genAI.apiKey) throw Error("Gemini API Key not found");
 
 pro.quota = 2;
 pro.refillDelay = 1000 * 30;

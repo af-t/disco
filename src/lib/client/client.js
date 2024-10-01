@@ -142,6 +142,85 @@ class Client extends require('./gateway') {
     }
 
     /**
+     * Get information about the current user.
+     * @returns {Promise<object>} The user object.
+     */
+    async getCurrentUserInfo() {
+        return makeRequest('GET', '/users/@me');
+    }
+
+    /**
+     * Create a new guild.
+     * @param {string} name The name of the guild.
+     * @param {object} options The options to create the guild with.
+     * @returns {Promise<object>} The guild object.
+     */
+    async createGuild(name, options = {}) {
+        return makeRequest('POST', '/guilds', {
+            name,
+            ...options
+        });
+    }
+
+    /**
+     * Leave a guild.
+     * @param {string} guildId The ID of the guild.
+     * @returns {Promise<object>} The guild object.
+     */
+    async leaveGuild(guildId) {
+        return makeRequest('DELETE', `/users/@me/guilds/${guildId}`);
+    }
+
+    /**
+     * Delete a guild.
+     * @param {string} guildId The ID of the guild.
+     * @returns {Promise<object>} The guild object.
+     */
+    async deleteGuild(guildId) {
+        return makeRequest('DELETE', `/guilds/${guildId}`);
+    }
+
+    /**
+     * Modify a guild's settings.
+     * @param {string} guildId - The ID of the guild to modify.
+     * @param {object} options - The settings to update, such as name, region, icon, etc.
+     * @returns {Promise<object>} - The modified guild object.
+     */
+    async modifyGuild(guildId, options = {}) {
+        return makeRequest('PATCH', `/guilds/${guildId}`, options);
+    }
+
+    /** 
+     * Update a guild's name.
+     * @param {string} guildId - The ID of the guild to update.
+     * @param {string} name - The new name for the guild.
+     * @returns {Promise<object>} - The updated guild object.
+     */
+    async updateGuildName(guildId, name) {
+        return this.modifyGuild(guildId, { name });
+    }
+
+    /**
+     * Update a guild's icon.
+     * @param {string} guildId - The ID of the guild to update.
+     * @param {string} icon - The new icon for the guild (base64-encoded image).
+     * @returns {Promise<object>} - The updated guild object.
+     */
+    async updateGuildIcon(guildId, icon) {
+        return this.modifyGuild(guildId, { icon });
+    }
+
+    /**
+     * Update a guild's banner.
+     * @param {string} guildId - The ID of the guild to update.
+     * @param {string} banner - The new banner for the guild (base64-encoded image).
+     * @returns {Promise<object>} - The updated guild object.
+     */
+    async updateGuildBanner(guildId, banner) {
+        return this.modifyGuild(guildId, { banner });
+    }
+
+    /**
      * Get information about a guild.
      * @param {string} guildId The ID of the guild.
      * @returns {Promise<object>} The guild object.
@@ -149,6 +228,68 @@ class Client extends require('./gateway') {
     async getGuildInfo(guildId) {
         return makeRequest('GET', `/guilds/${guildId}`);
     }
+
+    /**
+     * Get all members in a guild with filtering options.
+     * @param {string} guildId - The ID of the guild.
+     * @param {object} options - Filter options:
+     *                           - timeout (boolean): If true, return only members with timeouts.
+     *                           - roleId (string): Filter members by a specific role.
+     *                           - limit (number): The maximum number of members to return.
+     * @returns {Promise<object[]>} - A promise that resolves with an array of member objects.
+     */
+    async getGuildMembers(guildId, options = {}) {
+        let members = [];
+        let after = null; // For pagination
+        let remaining = options.limit || Infinity; // Limit of members to fetch, if not specified fetch all
+        let batch = [];
+
+        do {
+            // Prepare query params
+            const queryParams = new URLSearchParams({ limit: Math.min(1000, remaining) });
+            if (after) queryParams.set('after', after);
+
+            // Get a batch of members
+            batch = await makeRequest('GET', `/guilds/${guildId}/members?${queryParams}`);
+
+            // Update after for pagination (get the last member ID)
+            if (batch.length > 0) after = batch[batch.length - 1].user.id;
+            else break; // No more members to fetch
+
+            // Apply filters
+            let filteredBatch = batch;
+
+            // Filter by timeout
+            if (options.timeout === true) {
+                filteredBatch = filteredBatch.filter(member => member.communication_disabled_until);
+            } else if (options.timeout === false) {
+                filteredBatch = filteredBatch.filter(member => !member.communication_disabled_until);
+            }
+
+            // Filter by role
+            if (options.roleId) {
+                filteredBatch = filteredBatch.filter(member => member.roles.includes(options.roleId));
+            }
+
+            // Add to total members
+            members = members.concat(filteredBatch);
+            remaining -= batch.length;
+        } while (batch.length === 1000 && remaining > 0); // Continue fetching until no more members or limit is reached
+
+        return members;
+    }
+
+    /**
+     * Get a list of members in a guild.
+     * This is an alias for the `getGuildMembers` method.
+     * @param {string} guildId The ID of the guild.
+     * @param {object} options The options to get the members with.
+     * @returns {Promise<object>} The members object.
+     */
+    async getMembers(...args) {
+        return this.getGuildMembers(...args);
+    }
+
 
     /**
      * Get information about a guild member.
@@ -348,7 +489,7 @@ class Client extends require('./gateway') {
         return makeRequest('DELETE', `/channels/${channelId}`);
     }
 
-    
+
     /**
      * Get a list of channels in a guild.
      * @param {string} guildId - The ID of the guild.
@@ -416,7 +557,7 @@ class Client extends require('./gateway') {
      * @param {string} roleId - The ID of the role to remove.
      * @returns {Promise}
      */
-    async removeMemberRole(guildId, userId, roleId) {
+    async deleteMemberRole(guildId, userId, roleId) {
         return makeRequest('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`);
     }
 
@@ -439,7 +580,7 @@ class Client extends require('./gateway') {
      * @param {string} userId - The ID of the user who added the reaction.
      * @returns {Promise}
      */
-    async removeReaction(channelId, messageId, emoji, userId = '@me') {
+    async deleteReaction(channelId, messageId, emoji, userId = '@me') {
         return makeRequest('DELETE', `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/${userId}`);
     }
 
@@ -581,7 +722,7 @@ class Client extends require('./gateway') {
      * @returns {Promise<object>} The audit logs object.
      */
     async getAuditLogs(guildId, options = {}) {
-        const queryParams = new URLSearchParams(options).toString();
+        const queryParams = new URLSearchParams(options);
         return makeRequest('GET', `/guilds/${guildId}/audit-logs?${queryParams}`);
     }
 
@@ -614,6 +755,78 @@ class Client extends require('./gateway') {
      */
     async deleteEmoji(guildId, emojiId) {
         return makeRequest('DELETE', `/guilds/${guildId}/emojis/${emojiId}`);
+    }
+
+    /**
+     * Get a list of soundboards in a guild.
+     * @param {string} guildId - The ID of the guild.
+     * @returns {Promise<object[]>} - A promise that resolves with an array of soundboard objects.
+     */
+    async getSoundboards(guildId) {
+        return makeRequest('GET', `/guilds/${guildId}/soundboards`);
+    }
+
+    /**
+     * Delete a soundboard from a guild.
+     * @param {string} guildId - The ID of the guild.
+     * @param {string} soundboardId - The ID of the soundboard to delete.
+     * @returns {Promise<void>}
+     */
+    async deleteSoundboard(guildId, soundboardId) {
+        return makeRequest('DELETE', `/guilds/${guildId}/soundboards/${soundboardId}`);
+    }
+
+    /**
+     * Create a new soundboard in a guild.
+     * @param {string} guildId - The ID of the guild.
+     * @param {string} name - The name of the soundboard.
+     * @param {Buffer|string} file - The sound file (either a file path or a base64-encoded string).
+     * @returns {Promise<object>} - The created soundboard object.
+     */
+    async createSoundboard(guildId, name, file) {
+        const fileInfo = await getFileInfo(file);
+        return makeRequest('POST', `/guilds/${guildId}/soundboards`, {
+            name,
+            file: fileInfo.file_data.toString('base64')
+        });
+    }
+
+    /**
+     * Get a list of stickers in a guild.
+     * @param {string} guildId - The ID of the guild.
+     * @returns {Promise<object[]>} - A promise that resolves with an array of sticker objects.
+     */
+    async getStickers(guildId) {
+        return makeRequest('GET', `/guilds/${guildId}/stickers`);
+    }
+
+    /**
+     * Delete a sticker from a guild.
+     * @param {string} guildId - The ID of the guild.
+     * @param {string} stickerId - The ID of the sticker to delete.
+     * @returns {Promise<void>}
+     */
+    async deleteSticker(guildId, stickerId) {
+        return makeRequest('DELETE', `/guilds/${guildId}/stickers/${stickerId}`);
+    }
+
+    /**
+     * Create a new sticker in a guild.
+     * @param {string} guildId - The ID of the guild.
+     * @param {string} name - The name of the sticker.
+     * @param {string} tags - Tags associated with the sticker.
+     * @param {Buffer|string} image - The sticker image (either a file path or a base64-encoded string).
+     * @param {number} type - The type of the sticker (e.g., standard or guild).
+     * @returns {Promise<object>} - The created sticker object.
+     */
+    async createSticker(guildId, name, tags, image, type) {
+        const fileInfo = await getFileInfo(image);
+        return makeRequest('POST', `/guilds/${guildId}/stickers`, {
+            name,
+            tags,
+            image: fileInfo.file_data.toString('base64'),
+            type
+        });
     }
 
     /**
@@ -663,10 +876,6 @@ class Client extends require('./gateway') {
      */
     async deleteMessageBulk(channelId, messageIds) {
         const res = await makeRequest('POST', `/channels/${channelId}/messages/bulk-delete`, { messages: messageIds });
-        if (res.retry_after) {
-            await (new Promise(resolve => setTimeout(resolve, res.retry_after * 1000)));
-            return this.deleteMessageBulk(channelId, messageIds);
-        }
         return res;
     }
 
@@ -705,7 +914,8 @@ class Client extends require('./gateway') {
                 if (has2WeeksAgo) break;
             }
         } catch (error) {
-            await new Promise(resolve => setTimeout(resolve, (error.retry_after ? error.retry_after : 2.5) * 1000));
+            if (error?.retry_after) await new Promise(resolve => setTimeout(resolve, error.retry_after * 1000));
+            else console.warn(`Failed to delete messages: ${error}`);
         }
 
         return deleted;
@@ -728,18 +938,27 @@ class Client extends require('./gateway') {
      * @param {object} queries The query parameters.
      * @returns {Promise<object>} The messages object.
      */
-    async getMessages(channelId, queries = {}) {
-        let endpoint = `/channels/${channelId}/messages`;
-        let hasquery = false;
-        for (const key in queries) if (queries[key]) if (hasquery) {
-            endpoint += `&${key}=${queries[key]}`;
-        } else {
-            endpoint += `?${key}=${queries[key]}`;
-            hasquery = true;
-        }
-        return makeRequest('GET', endpoint);
+    async getMessages(channelId, options = {}) {
+        const queryParams = new URLSearchParams(options);
+        return makeRequest('GET', `/channels/${channelId}/messages?${queryParams}`);
     }
 
+    /**
+     * Get messages from a channel.
+     * This is an alias for the `getMessages` method.
+     * @param {string} channelId The ID of the channel.
+     * @param {object} queries The query parameters.
+     * @returns {Promise<object>} The messages object.
+     */
+    async getChannelMessages(...args) {
+        return this.getMessages(...args);
+    }
+
+    /**
+     * Send a typing indicator to a channel.
+     * @param {string} channelId The ID of the channel.
+     * @returns {Promise<object>} The typing indicator object.
+     */
     async sendTyping(channelId) {
         return makeRequest('POST', `/channels/${channelId}/typing`);
     }
