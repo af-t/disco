@@ -1,11 +1,11 @@
 module.exports = {
     data: {
-        name: "avatar",
-        usage: "avatar [users]",
-        aliases: [ "av" ],
-        description: "Displays the avatar of the user(s) specified."
+        name: 'avatar',
+        usage: 'avatar [users]',
+        aliases: [ 'av' ],
+        description: 'Displays the avatar of the user(s) specified.'
     },
-    execute: async (c, d, a) => {
+    execute: async (d, a) => {
         const uids = new Set();
         const embeds = [];
         let guildId;
@@ -21,7 +21,7 @@ module.exports = {
             guildId = d.message_reference.guild_id;
             channelId = d.message_reference.channel_id;
             try {
-                const m = await c.getMessage(channelId, d.message_reference.message_id);
+                const m = await client.getMessage(channelId, d.message_reference.message_id);
                 uids.add(m.author.id);
             } catch {
                 guildId = null;
@@ -32,7 +32,7 @@ module.exports = {
 
         if (!channelId) channelId = d.channel_id;
         if (!guildId) try {
-            guildId = (await c.getChannelInfo(channelId)).guild_id;
+            guildId = (await client.getChannelInfo(channelId)).guild_id;
         } catch (err) {
             console.warn(err);
         }
@@ -40,22 +40,22 @@ module.exports = {
         for (let id of uids) {
             let avatar;
             let username;
-            let title = "Server Avatar";
+            let title = 'Server Avatar';
             try {
-                const memberInfo = await c.getMemberInfo(guildId, id);
+                const memberInfo = await client.getMemberInfo(guildId, id);
                 if (memberInfo.avatar) {
                     avatar = memberInfo.avatar;
                     username = memberInfo.user.username;
                 } else if (memberInfo.user?.avatar) {
                     avatar = memberInfo.user.avatar;
                     username = memberInfo.user.username;
-                } else throw "";
+                } else throw '';
             } catch {
                 try {
-                    const userInfo = await c.getUserInfo(id);
+                    const userInfo = await client.getUserInfo(id);
                     avatar = userInfo.avatar;
                     username = userInfo.username;
-                    title = "User Avatar";
+                    title = 'User Avatar';
                 } catch (err) {
                     console.warn(err);
                     continue;
@@ -72,9 +72,9 @@ module.exports = {
                     url: `https://cdn.discordapp.com/avatars/${id}/${avatar}.png?size=4096`
                 },
                 title,
-                type: "rich"
+                type: 'rich'
             });
         }
-        c.sendMessage(d.channel_id, null, { embeds }).catch(() => c.reply(d, "No avatars found").catch(console.warn));
+        client.sendMessage(d.channel_id, null, { embeds }).catch(() => client.reply(d, 'No avatars found').catch(console.warn));
     }
 };

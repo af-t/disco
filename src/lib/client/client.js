@@ -1,10 +1,12 @@
 const fs = require('fs').promises;
 const https = require('https');
 const { basename } = require('path');
+const { types } = require('mime-types');
 
 // environment
 let reqTimeout = 30000;
 let token;
+let usePrefix = true;
 
 const getFileInfo = async (fileObj) => {
     if (typeof fileObj === 'string') {
@@ -12,12 +14,13 @@ const getFileInfo = async (fileObj) => {
             try {
                 const response = await fetch(fileObj);
                 const buffer = await response.arrayBuffer();
+                const parsedUrl = new URL(fileObj);
                 return {
-                    file_name: basename(URL.parse(fileObj).pathname),
+                    file_name: basename(parsedUrl.pathname),
                     file_size: buffer.byteLength,
                     file_data: Buffer.from(buffer)
                 };
-            } catch {
+            } catch (error) {
                 console.warn(`Can't download: ${fileObj}`);
                 return;
             }
@@ -58,7 +61,7 @@ const makeRequest = async (method, endpoint, body = null, headers = {}) => {
             hostname: 'discord.com',
             path: `/api/v10${endpoint}`,
             headers: {
-                'Authorization': `Bot ${token}`,
+                'Authorization': `${usePrefix ? "Bot " : ""}${token}`,
                 'Content-Type': 'application/json',
                 ...headers
             },
@@ -119,8 +122,30 @@ class Client extends require('./gateway') {
                 set(value) {
                     token = value;
                 }
+            },
+            "_use_prefix": {
+                enumerable: true,
+                get() {
+                    return usePrefix;
+                },
+                set(value) {
+                    usePrefix = Boolean(value);
+                }
             }
         });
+
+        // API test
+        this.getCurrentUserInfo()
+          .then(() => {})
+          .catch(() => {
+            usePrefix = false;
+            this.getCurrentUserInfo()
+              .then(() => {})
+              .catch(() => {
+                  console.warn("API test failed");
+                  usePrefix = true; // back to default
+              });
+          });
     }
 
     /**
@@ -744,7 +769,14 @@ class Client extends require('./gateway') {
      * @returns {Promise<object>} The created emoji object.
      */
     async createEmoji(guildId, name, image, roles = []) {
-        return makeRequest('POST', `/guilds/${guildId}/emojis`, { name, image, roles });
+        const fileInfo = await getFileInfo(image);
+        const fileData = fileInfo.file_data.toString("base64");
+        const fileType = types[fileInfo.file_name.split(".").pop()];
+        return makeRequest('POST', `/guilds/${guildId}/emojis`, {
+            name,
+            image: `data:${fileType};base64,${fileData}`,
+            roles
+        });
     }
 
     /**
@@ -821,10 +853,12 @@ class Client extends require('./gateway') {
      */
     async createSticker(guildId, name, tags, image, type) {
         const fileInfo = await getFileInfo(image);
+        const fileData = fileInfo.file_data.toString("base64");
+        const fileType = types[fileInfo.file_name.split(".").pop()];
         return makeRequest('POST', `/guilds/${guildId}/stickers`, {
             name,
             tags,
-            image: fileInfo.file_data.toString('base64'),
+            image: `data:${fileType};base64,${fileData}`,
             type
         });
     }
@@ -904,18 +938,17 @@ class Client extends require('./gateway') {
                     else has2WeeksAgo = true;
                 });
 
-                if (messagesToDelete.length > 1) await this.deleteMessageBulk(channelId, messagesToDelete.map(o => o.id));
-                else if (messagesToDelete.length > 0) await this.deleteMessage(channelId, messagesToDelete[messagesToDelete.length - 1].id);
-
                 deleted += messagesToDelete.length;
                 remain = count - deleted;
 
+                if (messagesToDelete.length > 1) await this.deleteMessageBulk(channelId, messagesToDelete.map(o => o.id));
+                else if (messagesToDelete.length > 0) await this.deleteMessage(channelId, messagesToDelete[messagesToDelete.length - 1].id);
                 if (messages.length < 100) break;
                 if (has2WeeksAgo) break;
             }
         } catch (error) {
             if (error?.retry_after) await new Promise(resolve => setTimeout(resolve, error.retry_after * 1000));
-            else console.warn(`Failed to delete messages: ${error}`);
+            else console.warn(`Failed to delete messages:`, error?.message ?? error);
         }
 
         return deleted;
@@ -961,6 +994,15 @@ class Client extends require('./gateway') {
      */
     async sendTyping(channelId) {
         return makeRequest('POST', `/channels/${channelId}/typing`);
+    }
+
+    /**
+     * Open a DM channel with a user.
+     * @param {string} userId - The ID of the user to open a DM with.
+     * @returns {Promise<object>} - The DM channel object.
+     */
+    async openDM(userId) {
+        return makeRequest('POST', '/users/@me/channels', { recipient_id: userId });
     }
 }
 

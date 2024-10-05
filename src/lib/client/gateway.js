@@ -1,15 +1,15 @@
-const { WebSocket } = require("ws");
-const { inflateSync } = require("zlib");
-const { basename } = require("path");
-const os = require("os");
+const { WebSocket } = require('ws');
+const { inflateSync } = require('zlib');
+const { basename } = require('path');
+const os = require('os');
 
 class Client {
     constructor(token, bits, shard = [0, 1], connect = true) {
         this._token = token;
         this._intentBits = bits;
         this._shard = shard;
-        this._gateway_url = "wss://gateway.discord.gg";
-        this._gateway_query = "?v=10&encoding=json";
+        this._gateway_url = 'wss://gateway.discord.gg';
+        this._gateway_query = '?v=10&encoding=json';
         this._session = {};
         this._eventHandlers = new Map();
         this._heartbeatInterval = null;
@@ -21,10 +21,10 @@ class Client {
     initializeWebSocket() {
         const ws = new WebSocket(this._gateway_url + this._gateway_query);
 
-        ws.on("message", this.handleMessage.bind(this));
-        ws.on("error", this.handleError.bind(this));
-        ws.on("close", this.handleClose.bind(this));
-        ws.on("open", this.handleOpen.bind(this));
+        ws.on('message', this.handleMessage.bind(this));
+        ws.on('error', this.handleError.bind(this));
+        ws.on('close', this.handleClose.bind(this));
+        ws.on('open', this.handleOpen.bind(this));
 
         this._ws = ws;
     }
@@ -38,7 +38,7 @@ class Client {
                 parsed = JSON.parse(message);
             } catch {
                 // handle if needed
-                console.warn(`${basename(__dirname)}: Failed to parse message from gateway`);
+                console.warn('Failed to parse message from gateway');
                 return;
             }
         }
@@ -74,14 +74,14 @@ class Client {
     }
 
     handleDispatch(eventName, eventData) {
-        if (eventName === "READY") {
+        if (eventName === 'READY') {
             this._session.id = eventData.session_id;
             this._gateway_url = eventData.resume_gateway_url;
             this._user = eventData.user;
             this._application = eventData.application;
-        } else if (eventName === "GUILD_CREATE") {
+        } else if (eventName === 'GUILD_CREATE') {
             this._servers.add(eventData.id);
-        } else if (eventName === "GUILD_DELETE") {
+        } else if (eventName === 'GUILD_DELETE') {
             this._servers.delete(eventData.id);
         }
 
@@ -90,14 +90,14 @@ class Client {
     }
 
     handleError(error) {
-        this._ws.closed_what = () => console.warn(`${basename(__dirname)}: WebSocket error: ${error.message}`);
+        this._ws.closed_what = () => console.warn(`WebSocket error: ${error.message}`);
     }
 
     handleClose() {
         if (this._ws.closed_what) {
             this._ws.closed_what();
         } else {
-            console.warn(`${basename(__dirname)}: Connection closed unexpectedly, restarting websocket...`);
+            console.warn('Connection closed unexpectedly, restarting websocket...');
         }
         clearInterval(this._heartbeatInterval);
         setTimeout(() => this.initializeWebSocket(), 5000);
@@ -113,9 +113,9 @@ class Client {
     }
 
     resetConnection() {
-        this._gateway_url = "wss://gateway.discord.gg";
+        this._gateway_url = 'wss://gateway.discord.gg';
         this._session = {};
-        this._ws.closed_what = () => console.warn(`${basename(__dirname)}: connection reset requested from gateway.`);
+        this._ws.closed_what = () => console.warn('Connection reset requested from gateway.');
         this._ws.terminate();
     }
 
@@ -142,7 +142,7 @@ class Client {
                 properties: {
                     os: `${os.type()} ${os.platform()} ${os.machine()}`,
                     device: process.env.COMPUTERNAME || os.hostname(),
-                    browser: "Mozilla/5.0"
+                    browser: 'Mozilla/5.0'
                 }
             }
         }));
@@ -156,7 +156,7 @@ class Client {
     }
 
     on(eventName, handler) {
-        if (typeof handler !== "function") return;
+        if (typeof handler !== 'function') return;
 
         const handlers = this._eventHandlers.get(eventName) || [];
         handlers.push(handler);

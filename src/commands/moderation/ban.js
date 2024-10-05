@@ -4,14 +4,14 @@ module.exports = {
         usage: "ban <member> [reason]",
         description: "Bans a member from the server"
     },
-    execute: async (c, d, a) => {
+    execute: async (d, a) => {
         let reason = '';
         let response;
         const uids = new Set();
 
         if (d.message_reference) {
             try {
-                const m = await c.getMessage(d.message_reference.channel_id, d.message_reference.message_id);
+                const m = await client.getMessage(d.message_reference.channel_id, d.message_reference.message_id);
                 uids.add(m.author.id);
             } catch {}
             reason = a.join(' ');
@@ -28,11 +28,11 @@ module.exports = {
         else {
             let banned = 0;
             for (const uid of uids) try {
-                await c.banMember(d.guild_id, uid, reason);
+                await client.banMember(d.guild_id, uid, reason);
                 banned++;
             } catch {}
             response = `Banned ${banned} user${banned === 1 ? "" : "s"}`;
         }
-        setTimeout(() => c.reply(d, response).catch(console.warn)); // using timeout to solve bad request error problem
+        setTimeout(() => client.reply(d, response).catch(console.warn)); // using timeout to solve bad request error problem
     }
 };

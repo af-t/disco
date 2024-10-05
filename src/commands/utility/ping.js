@@ -1,10 +1,10 @@
 const testPing = async(c) => {
     const wsPingStart = Date.now();
-    await c.ping().catch(console.warn);
+    await client.ping().catch(console.warn);
     const wsPing = Date.now() - wsPingStart;
 
     const apiPingStart = Date.now();
-    await c.getUserInfo(`@me`).catch(console.warn);
+    await client.getUserInfo(`@me`).catch(console.warn);
     const apiPing = Date.now() - apiPingStart;
 
     return [
@@ -18,8 +18,8 @@ module.exports = {
         name: 'ping',
         description: "Check the bot's latency"
     },
-    execute: async (c, d) => c.sendMessage(d.channel_id, `Pong.`).then(async(m) => {
+    execute: async (d) => client.sendMessage(d.channel_id, `Pong.`).then(async(m) => {
         const ping = await testPing(c);
-        c.editMessage(m, `Pong.\n${ping.join("\n")}`).catch(console.warn);
+        client.editMessage(m, `Pong.\n${ping.join("\n")}`).catch(console.warn);
     }).catch(console.warn)
 };

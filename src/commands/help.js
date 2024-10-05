@@ -3,7 +3,7 @@ module.exports = {
         name: "help",
         description: "displays a list of commands available"
     },
-    execute: (c, d) => {
+    execute: (d) => {
         const embeds = [];
         const cmds = new Map();
         let embed;
@@ -21,6 +21,6 @@ module.exports = {
         }
         if (embed) embeds.push(embed);
 
-        c.sendMessage(d.channel_id, "### Commands available", { embeds }).catch(console.warn);
+        client.sendMessage(d.channel_id, "### Commands available", { embeds }).catch(console.warn);
     }
 };

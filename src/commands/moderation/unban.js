@@ -4,7 +4,7 @@ module.exports = {
         usage: "unban <member>",
         description: "Unbans a member from the server"
     },
-    execute: async (c, d, a) => {
+    execute: async (d, a) => {
         let response;
         const uids = new Set();
 
@@ -18,11 +18,11 @@ module.exports = {
         else {
             let unbanned = 0;
             for (const uid of uids) try {
-                await c.unbanMember(d.guild_id, uid);
+                await client.unbanMember(d.guild_id, uid);
                 unbanned++;
             } catch {}
             response = `Unbanned ${unbanned} user${unbanned === 1 ? "" : "s"}`;
         }
-        setTimeout(() => c.reply(d, response).catch(console.warn)); // using timeout to solve bad request error problem
+        setTimeout(() => client.reply(d, response).catch(console.warn)); // using timeout to solve bad request error problem
     }
 };

@@ -28,31 +28,31 @@ module.exports = {
         usage: "mute <member> [duration]",
         description: "Mutes a member for a specified duration"
     },
-    execute: async (c, d, a) => {
+    execute: async (d, a) => {
         let member = formatToID(a[0]);
         let duration = formatToMS(a[1]);
         let guildId = d.guild_id;
 
         if (!member) if (d.message_reference) try {
-            const m = await c.getMessage(d.message_reference.channel_id, d.message_reference.message_id);
+            const m = await client.getMessage(d.message_reference.channel_id, d.message_reference.message_id);
             member = m.author.id;
             duration = formatToMS(a[0]);
             guildId = d.message_reference.guild_id;
         } catch {}
 
-        if (Number.isNaN(duration)) return c.reply(d, "Invalid duration").catch(console.warn);
-        if (!member) return c.reply(d, "Invalid member").catch(console.warn);
+        if (Number.isNaN(duration)) return client.reply(d, "Invalid duration").catch(console.warn);
+        if (!member) return client.reply(d, "Invalid member").catch(console.warn);
 
         try {
             if (!guildId) {
-                const channelInfo = await c.getChannelInfo(d.channel_id);
+                const channelInfo = await client.getChannelInfo(d.channel_id);
                 guildId = channelInfo.guild_id;
             }
-            await c.muteMember(guildId, member, duration);
+            await client.muteMember(guildId, member, duration);
 
-            c.reply(d, `Muted <@${member}>`).catch(console.warn);
+            client.reply(d, `Muted <@${member}>`).catch(console.warn);
         } catch (error) {
-            c.reply(d, `Failed to mute <@${member}>.`).catch(console.warn);
+            client.reply(d, `Failed to mute <@${member}>.`).catch(console.warn);
             console.warn(error);
         }
     }

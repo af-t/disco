@@ -3,7 +3,7 @@ module.exports = {
         name: "info",
         description: "Displays information about the bot"
     },
-    execute: (c, d) => {
+    execute: (d) => {
         const info = plugins.systemInfo();
         const embeds = [
             {
@@ -48,8 +48,8 @@ module.exports = {
                     }
                 ].map(o => ({ inline: true, ...o })),
                 author: {
-                    name: c._user.username,
-                    icon_url: `https://cdn.discordapp.com/avatars/${c._user.id}/${c._user.avatar}`
+                    name: client._user.username,
+                    icon_url: `https://cdn.discordapp.com/avatars/${client._user.id}/${client._user.avatar}`
                 },
                 color: 46433
             },
@@ -85,11 +85,11 @@ module.exports = {
                     },
                     {
                         name: "Shards",
-                        value: c._shard[1]
+                        value: client._shard[1]
                     },
                     {
                         name: "Servers",
-                        value: c._servers.size
+                        value: client._servers.size
                     }
                 ].map(o => ({ inline: true, ...o })),
                 color: 46433
@@ -105,6 +105,6 @@ module.exports = {
                 color: 46433
             }
         ];
-        c.sendMessage(d.channel_id, null, { embeds }).catch(console.warn);
+        client.sendMessage(d.channel_id, null, { embeds }).catch(console.warn);
     }
 };

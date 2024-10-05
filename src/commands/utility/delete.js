@@ -8,12 +8,12 @@ module.exports = {
         aliases: [ "rm", "del", "remove" ],
         description: "Delete a message"
     },
-    execute: (c, d) => {
+    execute: (d) => {
         const mToDel = new Set();
 
         mToDel.add(d.id);
         if (d.message_reference) mToDel.add(d.message_reference.message_id);
 
-        c.deleteMessageBulk(d.channel_id, [...mToDel.values()]).catch(console.warn);
+        client.deleteMessageBulk(d.channel_id, [...mToDel.values()]).catch(console.warn);
     }
 };
