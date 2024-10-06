@@ -19,7 +19,7 @@ module.exports = {
         description: "Check the bot's latency"
     },
     execute: async (d) => client.sendMessage(d.channel_id, `Pong.`).then(async(m) => {
-        const ping = await testPing(c);
+        const ping = await testPing(client);
         client.editMessage(m, `Pong.\n${ping.join("\n")}`).catch(console.warn);
     }).catch(console.warn)
 };

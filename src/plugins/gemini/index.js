@@ -1,7 +1,9 @@
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
+const { GoogleAIFileManager } = require('@google/generative-ai/server');
 const fs = require('fs');
-const { join } = require('path');
+const { join, basename } = require('path');
 
+const fileManager = new GoogleAIFileManager(global.gemini_token ?? process.env.GEMINI_TOKEN ?? global.config?.gemini?.token);
 const genAI = new GoogleGenerativeAI(global.gemini_token ?? process.env.GEMINI_TOKEN ?? global.config?.gemini?.token);
 const genOpts = {
     tools: [{ codeExecution: {} }],
@@ -18,7 +20,7 @@ const genOpts = {
         return fs.existsSync(ipath) ? fs.readFileSync(ipath).toString() : null;
     })(),
     generationConfig: {
-        temperature: 0.5
+        temperature: 0.2
     }
 };
 
@@ -69,6 +71,8 @@ const executeAI = async (id, parts) => {
         ret.model = session.model;
         return ret;
     } catch (error) {
+        console.error(error);
+
         if (pro.disabled) {
             pro.disabled = false;
             throw Error('There seems to be a problem with Google servers');
@@ -107,14 +111,11 @@ const validate = (history) => {
 
 const saveSessions = async (path = join(__dirname, 'histories')) => {
     resolveDir(path);
-    const ids = [...session.keys()];
+    const ids = [...sessions.keys()];
     for (const id of ids) {
         const session = sessions.get(id);
         const savePath = join(path, `generative_history_${id}.json`);
-        const saveData = {
-            model: session.model,
-            history: await session.getHistoy()
-        };
+        const saveData = { history: session._history };
         await fs.promises.writeFile(savePath, JSON.stringify(saveData));
     }
 };
@@ -133,7 +134,7 @@ const loadSessions = async (path = join(__dirname, 'histories')) => {
         const id = f.match(/genetative_history_(.+).json/)[1];
         try {
             const data = JSON.parse(await fs.promises.readFile(f));
-            setupAI(id, data.model, data.history);
+            createSession(id, data.history);
             sucess++;
         } catch {
             fail++;
@@ -166,17 +167,19 @@ const mimeCheck = (mimeType) => {
     if (sub === 'pdf') return true;
 };
 
-const toGenerativePart = async (file, mimeType, leakedSize) => {
+const toGenerativePart = async (file, mimeType, leakedSize, filename) => {
     let data = Buffer.alloc(0);
+    let unlink = false; // Unlink after upload
+
     if (typeof file !== 'string') throw TypeError(`The "file" argument must be of type string. Received ${typeof file}`);
     if (leakedSize > 10 * 1024 * 1024) throw Error('File size is too large');
     if (fs.existsSync(file)) {
         const stat = fs.statSync(file);
         if (!stat.isFile()) throw Error(`The ${file} not a file`);
         if (stat.size > 10 * 1024 * 1024) throw Error('The file size is too large. The maximum limit is 10Mb');
-        data = await fs.promises.readFile(file);
+        data = fs.readFileSync(file);
     } else try {
-        const { href } = new URL(file);
+        const { href, pathname } = new URL(file);
         const res = await fetch(href);
         if (!res.ok) {
             console.warn('Response not OK:', res.statusText);
@@ -184,6 +187,9 @@ const toGenerativePart = async (file, mimeType, leakedSize) => {
         }
         data = await res.arrayBuffer();
         data = Buffer.from(data);
+        file = join(process.env.TMPDIR ?? process.env.TEMP ?? '.', basename(pathname));
+        unlink = true;
+        fs.writeFileSync(file, data);
     } catch {
         throw Error(`The ${file} can't be loaded`);
     }
@@ -196,7 +202,18 @@ const toGenerativePart = async (file, mimeType, leakedSize) => {
     // Check mime is allowed
     if (!mimeCheck(mimeType)) throw Error(`Mime type "${mimeType}" is not allowed`);
 
-    return { inlineData: { data: data.toString('base64'), mimeType } };
+    const uploadRes = await fileManager.uploadFile(file, {
+        mimeType,
+        displayName: filename || file
+    });
+    if (unlink) fs.unlinkSync(file);
+
+    return {
+        fileData: {
+            mimeType: uploadRes.file.mimeType,
+            fileUri: uploadRes.file.uri
+        }
+    };
 };
 
 module.exports = {

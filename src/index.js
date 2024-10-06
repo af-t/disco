@@ -10,6 +10,7 @@ global.plugins = {};
 global.cmds = {};
 
 global.dbPath = realpath(__dirname, '..', 'database');
+global.libPath = realpath(__dirname, 'lib');
 global.discord_token = '';
 global.gemini_token = '';
 global.client;

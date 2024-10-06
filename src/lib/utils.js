@@ -1,36 +1,37 @@
-const { Worker, isMainThread, parentPort } = require("worker_threads");
-const fs = require("fs");
-const { join, basename } = require("path");
-const { inspect } = require("util")
+const { Worker, isMainThread, parentPort } = require('worker_threads');
+const fs = require('fs');
+const { join, basename } = require('path');
+const { inspect } = require('util')
 
 const workerJobs = {};
 let worker;
+let restart = 0;
 
 const log = (...args) => {
     for (let i = 0; i < args.length; i++) {
-        if (typeof args[i] === "string") process.stdout.write(args[i]);
+        if (typeof args[i] === 'string') process.stdout.write(args[i]);
         else process.stdout.write(inspect(args[i], null, 2, true));
-        if (i < args.length) process.stdout.write(" ");
+        if (i < args.length) process.stdout.write(' ');
     }
-    process.stdout.write("\n");
+    process.stdout.write('\n');
 };
 
 const err = (...args) => {
     for (let i = 0; i < args.length; i++) {
-        if (typeof args[i] === "string") process.stderr.write(args[i]);
+        if (typeof args[i] === 'string') process.stderr.write(args[i]);
         else process.stderr.write(inspect(args[i], null, 2, true));
-        if (i < args.length) process.stderr.write(" ");
+        if (i < args.length) process.stderr.write(' ');
     }
-    process.stderr.write("\n");
+    process.stderr.write('\n');
 };
 
 const simple_logger = { 
-    error: (...args) => err("\x1b[0;31m*\x1b[m", ...args),
-    warn: (...args) => err("\x1b[0;33m*\x1b[m", ...args),
-    info: (...args) => log("\x1b[0;36m*\x1b[m", ...args),
-    log: (...args) => log("\x1b[0;37m*\x1b[m", ...args),
-    debug: (...args) => log("\x1b[0;35m*\x1b[m", ...args),
-    blue: (...args) => log("\x1b[0;34m*\x1b[m", ...args)
+    error: (...args) => err('\x1b[0;31m*\x1b[m', ...args),
+    warn: (...args) => err('\x1b[0;33m*\x1b[m', ...args),
+    info: (...args) => log('\x1b[0;36m*\x1b[m', ...args),
+    log: (...args) => log('\x1b[0;37m*\x1b[m', ...args),
+    debug: (...args) => log('\x1b[0;35m*\x1b[m', ...args),
+    blue: (...args) => log('\x1b[0;34m*\x1b[m', ...args)
 };
 
 const addJob = (command, execute) => {
@@ -51,7 +52,7 @@ const getCommandFiles = (path) => {
     const ret = [];
     const listFiles = fs.readdirSync(path).map(f => join(path, f));
     for (let i = 0; i < listFiles.length; i++) {
-        if (listFiles[i].endsWith(".js")) ret.push(listFiles[i]);
+        if (listFiles[i].endsWith('.js')) ret.push(listFiles[i]);
         else if (fs.statSync(listFiles[i]).isDirectory()) ret.push(...getCommandFiles(listFiles[i]));
     }
     return ret;
@@ -131,6 +132,19 @@ const loadCommands = (exports, path) => {
         }
     }
     simple_logger.info(`Loaded ${loadedCount} commands in ${(performance.now() - startTime).toFixed(1)}ms`);
+
+    // Checks changes that occur in a directory and performs some actions.
+    addJob(`watchDir:${path}`, (update) => {
+        if (update.change === 'add') {
+            // reload commands
+            loadCommands(exports, path);
+        } else if (update.change === 'del') {
+            for (let key in exports) if (key.file === update.file) {
+                // Remove command from lists
+                //delete exports[key];
+            }
+        }
+    });
 };
 
 /**
@@ -147,7 +161,7 @@ const saveMessage = (m, path) => {
             cb ? reject(cb) : resolve();
             job.unused = true;
         };
-        addJob(`saveMessage:${Buffer.from(JSON.stringify(data)).toString("base64")}`, job);
+        addJob(`saveMessage:${Buffer.from(JSON.stringify(data)).toString('base64')}`, job);
     });
 };
 
@@ -167,6 +181,19 @@ const deleteMessage = (d, path) => {
     }
 };
 
+const createWorker = () => {
+    worker = new Worker(__filename);
+    worker.on('message', ({id, data}) => jobExecute(id, data));
+    worker.on('error', () => {});
+    worker.on('exit', code => {
+        if (restart >= 5) throw Error('Worker has been restarted up to 5 times and keeps crashing');
+        if (code > 0) console.warn(`Worker has crashed with code: ${code}`);
+        worker.removeAllListeners();
+        createWorker();
+        restart++;
+    });
+};
+
 if (isMainThread) {
     module.exports = {
         loadCommands,
@@ -174,30 +201,30 @@ if (isMainThread) {
         deleteMessage,
         logger: simple_logger
     }
-    worker = new Worker(__filename);
-    worker.on("message", ({id, data}) => jobExecute(id, data));
+    createWorker();
     console = Object.assign(console, simple_logger);
 } else {
     // watchFile
     let watchesFile = [];
     let watchFileInterval;
     parentPort.watchFile = (id, path) => {
-        watchesFile.push({id, path, current: fs.statSync(path)});
+        let included = false;
+        for (let i = 0; i < watchesFile.length; i++) if (watchesFile[i].path === path) included = true;
+        if (!included) watchesFile.push({id, path, current: fs.statSync(path)});
         if (!watchFileInterval) watchFileInterval = setInterval(async() => {
             let needToFilter = false;
             for (let i = 0; i < watchesFile.length; i++) {
                 let same = true;
                 try {
                     const stat = fs.statSync(watchesFile[i].path);
-                    for (const key in stat) if (typeof stat[key] === "number" && key !== "atimeMs") if (stat[key] !== watchesFile[i].current[key]) same = false;
+                    for (const key in stat) if (typeof stat[key] === 'number' && key !== 'atimeMs') if (stat[key] !== watchesFile[i].current[key]) same = false;
                     if (!same) {
                         parentPort.postMessage({id: watchesFile[i].id});
                         watchesFile[i].current = stat;
                     }
-                    await new Promise(resolve => setTimeout(resolve, 200));
                 } catch (error) {
                     simple_logger.error(error.message);
-                    simple_logger.error("Watch stopped");
+                    simple_logger.error('Watch stopped');
                     delete watchesFile[i];
                     needToFilter = true;
                     break;
@@ -218,10 +245,55 @@ if (isMainThread) {
         });
     };
 
-    parentPort.on("message", ({id, command}) => {
-        command = command.split(":");
+    let watchesDir = [];
+    let watchDirInterval;
+    const getLists = (path) => {
+        const lists = fs.readdirSync(path);
+        const matched = [];
+        for (let i = 0; i < lists.length; i++) {
+            const joined = join(path, lists[i]);
+            const stat = fs.statSync(joined);
+            if (stat.isDirectory()) {
+                const _lists = getLists(joined);
+                for (let j = 0; j < _lists.length; j++) matched.push(join(lists[i], _lists[j]));
+            } else matched.push(lists[i]);
+        }
+        return matched;
+    };
+    parentPort.watchDir = (id, path) => {
+        let included = false;
+        for (let i = 0; i < watchesDir.length; i++) if (watchesDir[i].path === path) included = true;
+        if (!included) watchesDir.push({id, path, current: getLists(path)});
+        if (!watchDirInterval) watchDirInterval = setInterval(async() => {
+            let needToFilter = false;
+            for (let i = 0; i < watchesDir.length; i++) {
+                let same = true;
+                try {
+                    const lists = getLists(watchesDir[i].path);
+                    const onlyIn_j = new Set;
+                    const onlyIn_k = new Set;
+                    for (let j = 0; j < lists.length; j++) if (!watchesDir[i].current.includes(lists[j])) onlyIn_j.add(lists[j]);
+                    for (let j = 0; j < watchesDir[i].current.length; j++) if (!lists.includes(watchesDir[i].current[j])) onlyIn_k.add(watchesDir[i].current[j]);
+                    watchesDir[i].current = lists;
+                    for (let j of onlyIn_j) parentPort.postMessage({ id: watchesDir[i].id, data: { change: 'add', file: join(path, j) } });
+                    for (let k of onlyIn_k) parentPort.postMessage({ id: watchesDir[i].id, data: { change: 'del', file: join(path, k) } });
+                } catch (error) {
+                    simple_logger.error(error.message);
+                    simple_logger.error('Watch stopped');
+                    delete watchesDir[i];
+                    needToFilter = true;
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            if (needToFilter) watchesFile = watchesFile.filter(o => o);
+        }, 100);
+    };
+
+    parentPort.on('message', ({id, command}) => {
+        command = command.split(':');
         const name = command.shift();
-        const data = command.join(":");
+        const data = command.join(':');
         parentPort[name](id, data);
     });
 }

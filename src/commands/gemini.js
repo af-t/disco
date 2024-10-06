@@ -51,7 +51,7 @@ module.exports = {
         if (d.attachments) for (let att of d.attachments) {
             let mimeType = att.content_type.split(';')[0];
             try {
-                const part = await plugins.gemini.toGenerativePart(att.url, mimeType, att.size);
+                const part = await plugins.gemini.toGenerativePart(att.url, mimeType, att.size, att.filename);
                 parts.push(part);
             } catch (error) {
                 console.warn('file attachment detected, but cannot be used in AI prompt');

@@ -34,19 +34,19 @@ const getFileInfo = async (fileObj) => {
             };
         }
     } else if (fileObj instanceof Object) {
-        if (fileObj.path) {
-            const stats = await fs.stat(fileObj.path);
-            const data = await fs.readFile(fileObj.path);
+        if (fileObj.path ?? fileObj.file_path) {
+            const stats = await fs.stat(fileObj.path ?? fileObj.file_path);
+            const data = await fs.readFile(fileObj.path ?? fileObj.file_path);
             return {
-                file_name: fileObj.name || fileObj.filename || basename(fileObj.path),
+                file_name: fileObj.name ?? fileObj.filename ?? fileObj.file_name ?? basename(fileObj.path ?? fileObj.file_path),
                 file_size: stats.size,
                 file_data: data
             };
-        } else if (fileObj.url) {
-            const response = await fetch(fileObj.url);
+        } else if (fileObj.url ?? fileObj.file_url) {
+            const response = await fetch(fileObj.url ?? fileObj.file_url);
             const buffer = await response.arrayBuffer();
             return {
-                file_name: fileObj.name || fileObj.filename || basename(new URL(fileObj.url).pathname),
+                file_name: fileObj.name ?? fileObj.filename ?? fileObj.file_name ?? basename(new URL(fileObj.url ?? fileObj.file_url).pathname),
                 file_size: buffer.byteLength,
                 file_data: Buffer.from(buffer)
             };
