@@ -229,10 +229,9 @@ if (isMainThread) {
                     needToFilter = true;
                     break;
                 }
-                await new Promise(resolve => setTimeout(resolve, 50));
             }
             if (needToFilter) watchesFile = watchesFile.filter(o => o);
-        }, 100);
+        }, 500);
     };
 
     // saveMessage
@@ -284,10 +283,9 @@ if (isMainThread) {
                     needToFilter = true;
                     break;
                 }
-                await new Promise(resolve => setTimeout(resolve, 50));
             }
-            if (needToFilter) watchesFile = watchesFile.filter(o => o);
-        }, 100);
+            if (needToFilter) watchesDir = watchesFile.filter(o => o);
+        }, 500);
     };
 
     parentPort.on('message', ({id, command}) => {
