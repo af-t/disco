@@ -1,59 +1,67 @@
-function formatToMS(duration) {
-    if (!duration) return 0;
-    let ret = 0;
-
-    if (duration.endsWith("s")) ret = Number(duration.slice(0, -1)) * 1000;
-    else if (duration.endsWith("m")) ret = Number(duration.slice(0, -1)) * 1000 * 60;
-    else if (duration.endsWith("h")) ret = Number(duration.slice(0, -1)) * 1000 * 60 * 60;
-    else if (duration.endsWith("d")) ret = Number(duration.slice(0, -1)) * 1000 * 60 * 60 * 24;
-    else if (duration.endsWith("w")) ret = Number(duration.slice(0, -1)) * 1000 * 60 * 60 * 24 * 7;
-    else if (duration.endsWith("M")) ret = Number(duration.slice(0, -1)) * 1000 * 60 * 60 * 24 * 30;
-    else if (duration.endsWith("y")) ret = Number(duration.slice(0, -1)) * 1000 * 60 * 60 * 24 * 365;
-    else if (duration.endsWith("ms")) ret = Number(duration)
-    else ret = Number(duration);
-
-    return ret;
+// Time conversation units
+const TIME_UNITS = {
+  s: 1000,
+  m: 1000 * 60,
+  h: 1000 * 60 * 60,
+  d: 1000 * 60 * 60 * 24,
+  w: 1000 * 60 * 60 * 24 * 7,
+  M: 1000 * 60 * 60 * 24 * 30,
+  y: 1000 * 60 * 60 * 24 * 365,
+  ms: 1
 }
 
-function formatToID(text) {
-    if (!text) return;
-    let id = text.match(/<@([0-9]+)>/)?.[1];
-    if (!id) if (!Number.isNaN(Number(text))) id = text;
-    return id;
+function parseDuration(duration) {
+  if (!duration || typeof duration !== 'string') return;
+  const match = duration.match(/^(\d+)(ms|[smhdwMy])$/);
+  if (!match) return;
+  const [value, unit] = match.slice(1);
+  const multiplier = TIME_UNITS[unit];
+  if (!multiplier) return;
+  return Number(value) * multiplier;
 }
 
-module.exports = {
-    data: {
-        name: "mute",
-        usage: "mute <member> [duration]",
-        description: "Mutes a member for a specified duration"
-    },
-    execute: async (d, a) => {
-        let member = formatToID(a[0]);
-        let duration = formatToMS(a[1]);
-        let guildId = d.guild_id;
+function extractUserID(input) {
+  if (!input || typeof input !== 'string') return;
+  let id = input.match(/<@!?(\d+)>/)?.[1];
+  if (!id && !isNaN(Number(input))) id = input;
+  if (id?.length > 15) return id;
+}
 
-        if (!member) if (d.message_reference) try {
-            const m = await client.getMessage(d.message_reference.channel_id, d.message_reference.message_id);
-            member = m.author.id;
-            duration = formatToMS(a[0]);
-            guildId = d.message_reference.guild_id;
-        } catch {}
+const execute = async(c, d, a) => {
+  let memberId = extractUserID(a[0]);
+  let duration = parseDuration(a[1]);
 
-        if (Number.isNaN(duration)) return client.reply(d, "Invalid duration").catch(console.warn);
-        if (!member) return client.reply(d, "Invalid member").catch(console.warn);
+  if (!memberId && d.message_reference) try {
+    const ref = await c.getMessage(d.channel_id, d.message_reference.message_id);
+    memberId = ref.author.id;
+    duration = parseDuration(a[0]);
+  } catch (error) {
+    console.warn(error);
+  }
 
-        try {
-            if (!guildId) {
-                const channelInfo = await client.getChannelInfo(d.channel_id);
-                guildId = channelInfo.guild_id;
-            }
-            await client.muteMember(guildId, member, duration);
+  if (!duration) {
+    c.reply(d, 'Invalid duration').catch(console.warn);
+    return;
+  }
+  if (!memberId) {
+    c.reply(d, 'Invalid member').catch(console.warn);
+    return;
+  }
 
-            client.reply(d, `Muted <@${member}>`).catch(console.warn);
-        } catch (error) {
-            client.reply(d, `Failed to mute <@${member}>.`).catch(console.warn);
-            console.warn(error);
-        }
-    }
+  try {
+    await c.muteMember(d.guild_id, memberId, duration);
+    await c.reply(d, `Muted <@${memberId}>`);
+  } catch (error) {
+    console.warn(error);
+    c.reply(d, `Failed to mute <@${memberId}>`).catch(console.warn);
+  }
+};
+
+export default {
+  execute,
+  data: {
+    name: 'mute',
+    usage: 'mute {member} {duration}',
+    permissions: ['MUTE_MEMBERS']
+  }
 };

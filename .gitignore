@@ -1,6 +1,6 @@
-database
 node_modules
-package-lock.json
+*-lock.json
 .env
 .idx
 .vscode
+*.lock

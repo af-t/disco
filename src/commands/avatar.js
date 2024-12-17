@@ -1,80 +1,72 @@
-module.exports = {
-    data: {
-        name: 'avatar',
-        usage: 'avatar [users]',
-        aliases: [ 'av' ],
-        description: 'Displays the avatar of the user(s) specified.'
-    },
-    execute: async (d, a) => {
-        const uids = new Set();
-        const embeds = [];
-        let guildId;
-        let channelId;
+//Constants
+const titles = ['Server Avatar', 'User Avatar'];
 
-        for (let _a of a) {
-            let id = _a.match(/<@([0-9]+)>/)?.[1];
-            if (!id) if (!Number.isNaN(Number(_a))) id = _a;
-            if (id?.length > 15) uids.add(id);
-        }
+//Helper function to get Discord CDN Url
+const getCdnUrl = (uid, aid) => `https://cdn.discordapp.com/avatars/${uid}/${aid}`;
 
-        if (uids.size < 1 && d.message_reference) {
-            guildId = d.message_reference.guild_id;
-            channelId = d.message_reference.channel_id;
-            try {
-                const m = await client.getMessage(channelId, d.message_reference.message_id);
-                uids.add(m.author.id);
-            } catch {
-                guildId = null;
-                channelId = null;
-            }
-        }
-        if (uids.size < 1) uids.add(d.author.id);
+//Main function
+const execute = async (c, m, a) => {
+  const uids = new Set(); // .size never be below 1
+  const embeds = [];
 
-        if (!channelId) channelId = d.channel_id;
-        if (!guildId) try {
-            guildId = (await client.getChannelInfo(channelId)).guild_id;
-        } catch (err) {
-            console.warn(err);
-        }
+  for (let i = 0; i < a.length; i++) {
+    let uid = a[i].match(/<@([0-9]+)>/)?.[1];
+    if (!uid && !isNaN(Number(a[i]))) uid = a[i];
+    if (uid.length > 15) uids.add(uid);
+  }
 
-        for (let id of uids) {
-            let avatar;
-            let username;
-            let title = 'Server Avatar';
-            try {
-                const memberInfo = await client.getMemberInfo(guildId, id);
-                if (memberInfo.avatar) {
-                    avatar = memberInfo.avatar;
-                    username = memberInfo.user.username;
-                } else if (memberInfo.user?.avatar) {
-                    avatar = memberInfo.user.avatar;
-                    username = memberInfo.user.username;
-                } else throw '';
-            } catch {
-                try {
-                    const userInfo = await client.getUserInfo(id);
-                    avatar = userInfo.avatar;
-                    username = userInfo.username;
-                    title = 'User Avatar';
-                } catch (err) {
-                    console.warn(err);
-                    continue;
-                }
-            }
-            embeds.push({
-                author: {
-                    name: username,
-                    icon_url: `https://cdn.discordapp.com/avatars/${id}/${avatar}`
-                },
-                image: {
-                    width: 1024,
-                    height: 1024,
-                    url: `https://cdn.discordapp.com/avatars/${id}/${avatar}.png?size=4096`
-                },
-                title,
-                type: 'rich'
-            });
-        }
-        client.sendMessage(d.channel_id, null, { embeds }).catch(() => client.reply(d, 'No avatars found').catch(console.warn));
+  if (uids.size < 1 && m.message_reference) try {
+    const mref = await c.getMessage(m.message_reference.channel_id, m.message_reference.message_id);
+    uids.add(mref.author.id);
+  } catch {
+    // message doesn't exist or has been deleted
+  }
+
+  if (uids.size < 1) uids.add(m.author.id);
+
+  for (const uid of uids) {// Prosess ids to embeds
+    let avatar, nick, title = titles[0];
+    try {
+      const meta = await c.getGuildMember(m.guild_id, uid);
+      avatar = meta.avatar || meta.user.avatar;
+      nick = meta.nick || meta.user.username;
+
+      if (!(avatar && nick)) throw ''; // the part that will probably never triggered
+    } catch {
+      try {
+        const meta = await c.getUser(uid);
+        avatar = meta.avatar;
+        nick = meta.username;
+        title = titles[1];
+      } catch {
+        continue;
+      }
     }
+
+    embeds.push({
+      author: {
+        name: nick,
+        icon_url: getCdnUrl(uid, avatar)
+      },
+      image: {
+        width: 1024,
+        height: 1024,
+        url: getCdnUrl(uid, avatar) + '.png?size=4096'
+      },
+      title,
+      type: 'rich'
+    });
+  }
+
+  // Send results
+  return c.sendMessage(m.channel_id, null, { embeds, message_reference: { message_id: m.id, channel_id: m.channel_id } });
 };
+
+export default {
+  execute,
+  data: {
+    name: 'avatar',
+    aliases: ['av', 'pp', 'pfp'],
+    usage: 'avatar [user]'
+  }
+}

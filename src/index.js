@@ -1,127 +1,137 @@
-const { Client, intentBits } = require('./lib/client');
-const fs = require('fs');
-const { join, resolve: realpath, basename } = require('path');
-const tools = require('./lib/utils.js');
+import Discord from './lib/discord.js';
+import tools from './lib/utility.js';
+//import webhook from './lib/client/webhook.js';
+import dotenv from 'dotenv';
+import fs from 'node:fs/promises';
+import permissionFlags from './lib/permission.js';
+import {join, dirname, resolve as rl} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
-require('dotenv').config();
 
-global.config = JSON.parse(fs.readFileSync(join(__dirname, 'config.json')));
-global.plugins = {};
-global.cmds = {};
+dotenv.config();
 
-global.dbPath = realpath(__dirname, '..', 'database');
-global.libPath = realpath(__dirname, 'lib');
-global.discord_token = '';
-global.gemini_token = '';
-global.client;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename); // import.meta.dirname alternative
 
-// Load all commands from the 'commands' directory.
-tools.loadCommands(global.cmds, realpath(__dirname, 'commands'));
+const DATABASE_PATH = rl(__dirname, '..', 'database');
+const COMMANDS_PATH = rl(__dirname, 'commands');
+const COMMAND_PREFIX = '.';
 
-// start
-(async() => {
-    // reparse tokens
-    await (async() => {
-        let temp = process.env.DISCORD_TOKEN ?? config.token;
-        try {
-            temp = new URL(temp);
-            console.info(`Using token from: ${temp.href}`);
-            await fetch(temp.href)
-              .then(res => res.text())
-              .then(res => global.discord_token = res.split('\n')[0])
-              .catch(() => {});
-        } catch {
-            global.discord_token = temp;
+const client = new Discord(process.env.DISCORD_TOKEN);
+
+client.commands = await tools.importCommands(COMMANDS_PATH);
+client.tempDM = new Map();
+
+const parseDM = async (message) => {
+  const content = message?.content;
+  const userId = message?.author?.id;
+  const dmInfo = client.tempDM.has(userId) ? client.tempDM.get(userId) : { contents: [], reading: false };
+
+  dmInfo.contents.push(content);
+  client.tempDM.set(userId, dmInfo);
+
+  if (!dmInfo.reading) {
+    dmInfo.reading = true;
+    return new Promise((resolve) => setTimeout(() => {
+      resolve({ useAI: true, rawArgs: dmInfo.contents.join('\n') });
+      client.tempDM.delete(userId);
+    }, 8000));
+  }
+  return {};
+};
+
+const parseMessage = (message) => {
+  let rawArgs = message.content.trim();
+  let args = rawArgs.split(/ +/);
+  const me = new RegExp(`<@!?${client._session.user.id}>`);
+
+  if (args[0] === COMMAND_PREFIX) {
+    const cmd = args[1];
+    if (cmd) {
+      args = args.slice(2);
+      rawArgs = rawArgs.slice(1).trim().slice(cmd.length).trim();
+      return { cmd, args, rawArgs }
+    }
+    return {};
+  }
+
+  if (args[0].startsWith(COMMAND_PREFIX)) {
+    const cmd = args[0].slice(1).trim();
+    args.shift();
+    rawArgs = rawArgs.slice(1).trim().slice(cmd.length).trim();
+    return { cmd, args, rawArgs };
+  }
+
+  if (rawArgs.match(me)) { // AI trigger
+    return { useAI: true, rawArgs };
+  }
+
+  return {};
+};
+
+client.on('CONNECT', () => {
+  client.connectTime = Date.now();
+  //console.info('Connecting...');
+});
+
+client.on('READY', (d) => {
+  console.info(`Logged in as \x1b[0;33m${d.user.username}\x1b[m${client.connectTime ? ' in \x1b[0;33m' + (Date.now() - client.connectTime) + 'ms\x1b[m' : ''}`);
+  console.info(`Currently serving \x1b[0;33m${d.guilds.length}\x1b[m server${d.guilds.length > 1 ? 's' : ''}`);
+});
+
+client.on('MESSAGE_CREATE', async(m) => {
+  const isGuildMessage = !!m.guild_id;
+  const isSelf = m.author.id === client._session.user.id;
+  const isBot = !!m.author.bot;
+
+  // ignore in several conditions
+  if (isBot || isSelf) return;
+
+  const {
+    useAI, cmd,
+    args,
+    rawArgs
+  } = await (isGuildMessage ? parseMessage : parseDM)(m);
+
+  if (cmd) {
+    let allow = true;
+
+    if (client.commands[cmd]?.permissions) {
+      if (!isGuildMessage) allow = false;
+      const memberMeta = await client.getGuildMember(m.guild_id, m.author.id);
+      let memberPermissions = 0n;
+
+      for (const roleId of memberMeta.roles) {
+        const guildRoles = await client.getRoles(m.guild_id);
+        const role = guildRoles.find(r => r.id === roleId);
+        if (role) memberPermissions |= BigInt(role.permissions);
+      }
+
+      const hasAdmin = (memberPermissions & 8n) === 8n;
+
+      for (const perm of client.commands[cmd].permissions) {
+        const permission = permissionFlags[perm];
+        if (permission) {
+          allow = allow ? (memberPermissions & permission) === permission : false;
+          allow = allow || hasAdmin;
+        } else {
+          console.warn(`Unknown permission ${perm} from command:`, cmd);
         }
-
-        temp = process.env.GEMINI_TOKEN ?? config.gemini.token;
-        try {
-            temp = new URL(temp);
-            console.info(`Using token from: ${temp.href}`);
-            await fetch(temp.href)
-              .then(res => res.text())
-              .then(res => global.gemini_token = res.split('\n')[0])
-              .catch(() => {});
-        } catch {
-            global.gemini_token = temp;
-        }
-    })();
-
-    if (!discord_token) {
-        console.error('Could not find a token. Please make sure that the token is set in either the config file or as an environment variable.');
-        process.exit(1);
+      }
     }
 
-    // load all plugins
-    for (let p of fs.readdirSync(join(__dirname, 'plugins')).map(p => realpath(__dirname, 'plugins', p))) if (!p.startsWith('.') && p.endsWith('.js') || fs.statSync(p).isDirectory()) {
-        if (p.endsWith('.js')) p = p.slice(0, p.length - 3);
-        const _p = require(p);
-        global.plugins[basename(p)] = _p;
-    }
+    return !!allow ? client.commands[cmd.toLowerCase()]?.(client, m, args, rawArgs) : client.reply(m, 'Please check the permission to use this command.');
+  }
 
-    // Start bot
-    client = new Client(discord_token, [
-        intentBits.GUILD_MESSAGES,
-        intentBits.GUILDS,
-        intentBits.DIRECT_MESSAGES,
-        intentBits.MESSAGE_CONTENT
-    ], config.shard);
+  if (useAI) {
+    return client.commands.ai?.(client, m, args, rawArgs);
+  }
+});
 
-    client.on('MESSAGE_CREATE', async(m) => {
-        tools.saveMessage(m, join(dbPath, 'messages'));
+client.connect();
 
-        // Ignore with several conditions
-        if (m.author.bot) return;
-        if (m.author.id === client._user.id) return;
-
-        let cmdreq;
-        let cmdargs;
-        let argsorigin;
-        let use_ai;
-        if (m.content.startsWith(process.env.COMMAND_PREFIX ?? config.prefix)) {
-            const args = m.content.slice(1).split(/ +/);
-            cmdreq = args.shift().toLowerCase();
-            const length = cmdreq.length;
-            cmdargs = args;
-            argsorigin = m.content.slice(1).trim().slice(length).trim();
-        } else if (m.content.startsWith(`<@${client._user.id}>`)) {
-            const args = m.content.split(/ +/).slice(1);
-            cmdreq = args.slice(0, 1)[0];
-            cmdargs = args.slice(1);
-            if (cmdreq) cmdreq = cmdreq.toLowerCase();
-            if (!(cmdreq in global.cmds)) {
-                const length = (`<@${client._user.id}>`).length;
-                cmdreq = null;
-                cmdargs = args.length > 1 ? args : [ 'Hi!' ];
-                argsorigin = m.content.slice(length).trim();
-                argsorigin = (argsorigin || cmdargs[0]).replaceAll(`<@${client._user.id}>`, config.gemini.name);
-            } else {
-                const length1 = (`<@${client._user.id}>`).length;
-                const length2 = cmdreq.length;
-                argsorigin = m.content.slice(length1).trim().slice(length2).trim();
-            }
-            if (!cmdreq) use_ai = true;
-        } else if (m.message_reference) {
-            if (global.gemini && gemini.mHist.has(`${m.message_reference.channel_id}/${m.message_reference.message_id}`)) if (m.content) {
-                argsorigin = m.content.replaceAll(`<@${client._user.id}>`, config.gemini.name);
-                use_ai = true;
-            }
-        } else if (m.content.includes(`<@${client._user.id}>`)) {
-            argsorigin = m.content.replaceAll(`<@${client._user.id}>`, config.gemini.name);
-            use_ai = true;
-        }
-
-        // Exec command if possible
-        if (cmdreq && cmdreq in global.cmds) global.cmds[cmdreq](m, cmdargs, argsorigin);
-        if (use_ai && 'ai' in global.cmds) global.cmds.ai(m, cmdargs, argsorigin);
-    });
-
-    client.on('MESSAGE_DELETE', (d) => tools.deleteMessage(d, join(dbPath, 'messages')));
-    client.on('MESSAGE_DELETE_BULK', (d) => tools.deleteMessage(d, join(dbPath, 'messages')));
-
-    client.on('READY', (d) => {
-        const yellow = (string) => `\x1b[0;33m${string}\x1b[m`;
-        console.log(`Logged in as ${yellow(d.user.username)}`);
-        console.log(`Currently serving ${yellow(d.guilds.length)} servers`);
-    });
-})();
+process.on('exit', () => client.cleanup());
+process.on('SIGTERM', () => process.exit());
+process.on('SIGINT', () => process.exit());
+process.on('uncaughtException', (error) => console.warn(error));
+process.on('unhandledRejection', (error) => console.warn(error));
