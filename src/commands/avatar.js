@@ -10,7 +10,7 @@ const execute = async (c, m, a) => {
   const embeds = [];
 
   for (let i = 0; i < a.length; i++) {
-    let uid = a[i].match(/<@([0-9]+)>/)?.[1];
+    let uid = a[i].match(/<@!?(\d+)>/)?.[1];
     if (!uid && !isNaN(Number(a[i]))) uid = a[i];
     if (uid.length > 15) uids.add(uid);
   }
@@ -18,8 +18,9 @@ const execute = async (c, m, a) => {
   if (uids.size < 1 && m.message_reference) try {
     const mref = await c.getMessage(m.message_reference.channel_id, m.message_reference.message_id);
     uids.add(mref.author.id);
-  } catch {
+  } catch (error) {
     // message doesn't exist or has been deleted
+    console.warn(error);
   }
 
   if (uids.size < 1) uids.add(m.author.id);
@@ -38,8 +39,8 @@ const execute = async (c, m, a) => {
         avatar = meta.avatar;
         nick = meta.username;
         title = titles[1];
-      } catch {
-        continue;
+      } catch (error) {
+        console.warn(error);
       }
     }
 
@@ -59,7 +60,7 @@ const execute = async (c, m, a) => {
   }
 
   // Send results
-  return c.sendMessage(m.channel_id, null, { embeds, message_reference: { message_id: m.id, channel_id: m.channel_id } });
+  c.reply(m, null, false, { embeds }).catch(console.warn);
 };
 
 export default {

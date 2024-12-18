@@ -8,6 +8,7 @@ import os from 'node:os';
 import fs from 'node:fs/promises';
 import fsS from 'node:fs'; //for synchronous operation
 import https from 'node:https';
+import crypto from 'node:crypto';
 
 // Helper function to simplify writing for sleep
 const sleep = (duration) => new Promise(resolve => setTimeout(resolve, duration));
@@ -23,7 +24,9 @@ export class Discord extends EventEmitter {
   static MAX_RETRIES = 5;
   static BOT_STATUS = 'online';
 
-  #gc = new Set(); //Downloads cache
+  // CACHE (permanent)
+  #removable = new Set(); // file cache
+  #checksums = new Map();
 
   constructor(token, intents, shard) {
     super();
@@ -204,7 +207,7 @@ export class Discord extends EventEmitter {
       //console.warn(error.stack);
     }
 
-    if (error.code === 'ENOTFOUND') {
+    if (error.code === 'ENOTFOUND' || error.code === 'EAI_AGAIN') {
       console.warn(`Can't connect to discord, make sure internet is available`);
       process.exit(1);
     }
@@ -266,16 +269,16 @@ export class Discord extends EventEmitter {
       file = fileURLToPath(file);
     }
 
-    let filename, filepath, file_size;
+    let filename, filepath, file_size, checksum;
     if (file.startsWith('http://') || file.startsWith('https://')) {
-      const { pathname } = new URL(file);
+      const {pathname} = new URL(file);
       const download = await (await fetch(file).catch(_ => _))?.arrayBuffer?.();
       if (download) {
-        filename = basename(pathname) || 'message.txt';
+        filename = basename(pathname) || 'message.bin';
         file_size = download.size;
-        filepath = join(process.env.TEMP || process.env.TMP || process.env.TMPDIR || (fsS.existsSync('/tmp') ? '/tmp' : '.'), filename);
+        filepath = join(process.env.TEMP || process.env.TMP || process.env.TMPDIR || (fsS.existsSync('/tmp') ? '/tmp' : '.'), `${Date.now()}-${filename}`);
         await fs.writeFile(filepath, Buffer.from(download));
-        this.#gc.add(filepath);
+        this.#removable.add(filepath);
       }
     } else if (fsS.existsSync(file)) {
       filename = basename(file);
@@ -283,7 +286,15 @@ export class Discord extends EventEmitter {
       file_size = (await fs.stat(file)).size;
     }
 
-    return { filepath, filename, file_size };
+    if (file_size <= 10 * 1024 * 1024) checksum = await new Promise((resolve, reject) => {
+      const stream = fsS.createReadStream(filepath);
+      const chsum = crypto.createHash('sha256');
+      stream.on('data', chunk => chsum.update(chunk));
+      stream.on('end', () => resolve(Array.from(chsum.digest(), d => d.toString(36)).join('')));
+      chsum.on('error', reject);
+    });
+
+    return { filepath, filename, file_size, checksum };
   }
 
   async setSaveMessagePath(path) {
@@ -349,7 +360,22 @@ export class Discord extends EventEmitter {
   async uploadToDiscord(channel_id, files = []) {
     if (!Array.isArray(files) || files.length < 1) return [];
     files = await Promise.all(files.map(this.#getFileInfo.bind(this)));
-    const {attachments} = await this.makeRequest('POST', `/channels/${channel_id}/attachments`, { files: files.map(f => ({ filename: f.filename, file_size: f.file_size })) });
+
+    const cached = [];
+    const upload = [];
+    for (let i = 0; i < files.length; i++) {
+      if (!files[i].checksum) {
+        upload.push({ ...files[i], id: i });
+        continue;
+      }
+      if (!this.#checksums.has(files[i].checksum)) {
+        upload.push({ ...files[i], id: i });
+        continue;
+      }
+      cached.push({ ...this.#checksums.get(files[i].checksum), id: i });
+    }
+
+    const {attachments} = await this.makeRequest('POST', `/channels/${channel_id}/attachments`, { files: upload.map(f => ({ filename: f.filename, file_size: f.file_size })) });
 
     for (let i = 0; i < attachments.length; i++) await new Promise((resolve, reject) => {
       const reader = fsS.createReadStream(files[i].filepath);
@@ -367,11 +393,16 @@ export class Discord extends EventEmitter {
       reader.pipe(req, { end: true });
     });
 
-    return attachments.map((item, index) => ({
-      uploaded_filename: item.upload_filename,
-      id: index,
-      filename: files[index].filename
-    }));
+    attachments.forEach((item, index) => {
+      const data = {
+        uploaded_filename: item.upload_filename,
+        id: upload[index].id,
+        filename: upload[index].filename
+      };
+      if (upload[index].checksum) this.#checksums.set(upload[index].checksum, data);
+      cached.push(data);
+    });
+    return cached;
   }
 
   async editChannel(channel_id, options = {}) {
@@ -934,8 +965,9 @@ export class Discord extends EventEmitter {
    */
   cleanup() {
     this._messages.migrateSync?.(); // save message data in memory to disk
+    this._messages._start = false; // prevent infinite loop
+    this.#removable.forEach(f => fsS.rmSync(f)); // delete temporary files
     fsS.rmSync(Discord.CACHE_PATH, { recursive: true }); // delete temporary cache directory
-    this.#gc.forEach(f => fsS.rmSync(f));
   }
 }
 

@@ -41,7 +41,7 @@ const execute = async (c, m, _, a) => {
   if (m.attachments) for (const att of m.attachments) try {
     const fileData = await (await fetch(att.url)).arrayBuffer();
     const tempDir = process.env.TEMP || process.env.TMP || process.env.TMPDIR || (fs.existsSync('/tmp') ? '/tmp' : '.');
-    const localFilePath = path.join(tempDir, att.filename);
+    const localFilePath = path.join(tempDir, `${Date.now()}-${att.filename}`);
     await fs.promises.writeFile(localFilePath, Buffer.from(fileData));
     parts.push(localFilePath);
   } catch (err) {
