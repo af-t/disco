@@ -71,7 +71,7 @@ export class Discord extends EventEmitter {
         await this.getUser('@me'); //Try without prefix
       } catch (error) {
         this._withPrefix = true;
-        console.warn('API test failed:', error.message);
+        console.warn('API test failed:', error);
         //console.warn(error.stack);
       }
     }
@@ -220,6 +220,15 @@ export class Discord extends EventEmitter {
     setTimeout(() => this.connect(), Discord.RECONNECT_DELAY);
   }
 
+  #deserialize(data) {
+    data = Buffer.from(data);
+    try {
+      return JSON.parse(data);
+    } catch {
+      return data;
+    }
+  }
+
   async makeRequest(method, endpoint, body, headers = {}) {
     const options = {
       method,
@@ -240,12 +249,7 @@ export class Discord extends EventEmitter {
 
     for (let i = 0; i < Discord.MAX_RETRIES; i++) try {
       const response = await fetch(targetUrl, options);
-      let data = Buffer.from(await response.arrayBuffer());
-
-      try {
-        data = JSON.parse(data);
-      } catch {}
-
+      const data = this.#deserialize(await response.arrayBuffer());
       if (response.ok) return data;
       throw data;
     } catch (error) {
@@ -253,10 +257,8 @@ export class Discord extends EventEmitter {
         console.warn('Got hit by rate limiting from discord');
         await sleep(error.retry_delay * 1000);
       }
-      if (error?.cause?.name !== 'ConnectTimeoutError') try {
-        return Promise.reject(Object.assign(Error(), error));
-      } catch {
-        return Promise.reject(error);
+      if (error?.cause?.name !== 'ConnectTimeoutError') {
+        throw error;
       }
     }
 
