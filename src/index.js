@@ -96,28 +96,29 @@ client.on('MESSAGE_CREATE', async(m) => {
   if (cmd) {
     let allow = true;
 
-    if (client.commands[cmd]?.permissions) {
-      if (!isGuildMessage) allow = false;
-      const memberMeta = await client.getGuildMember(m.guild_id, m.author.id);
-      let memberPermissions = 0n;
-
-      for (const roleId of memberMeta.roles) {
-        const guildRoles = await client.getRoles(m.guild_id);
-        const role = guildRoles.find(r => r.id === roleId);
-        if (role) memberPermissions |= BigInt(role.permissions);
+    if (client.commands[cmd]?.permissions) if (isGuildMessage) {
+      const member = m.member || await client.getGuildMember(m.guild_id, m.author.id);
+      let perms = 0n; //BigInt(0)
+      let guildRoles;
+      for (const id of member.roles) {
+        if (!guildRoles) guildRoles = await client.getRoles(m.guild_id);
+        const role = guildRoles.find(r => r.id === id);
+        if (role) perms |= BigInt(role.permissions);
       }
 
-      const hasAdmin = (memberPermissions & 8n) === 8n;
+      const hasAdmin = (perms & 8n) === 8n;
 
-      for (const perm of client.commands[cmd].permissions) {
-        const permission = permissionFlags[perm];
-        if (permission) {
-          allow = allow ? (memberPermissions & permission) === permission : false;
+      for (let perm of client.commands[cmd].permissions) {
+        perm = permissionFlags[perm];
+        if (perm) {
+          allow = allow ? (perms & perm) === perm : false;
           allow = allow || hasAdmin;
         } else {
           console.warn(`Unknown permission ${perm} from command:`, cmd);
         }
       }
+    } else {
+      allow = false;
     }
 
     return !!allow ? client.commands[cmd.toLowerCase()]?.(client, m, args, rawArgs) : client.reply(m, 'Please check the permission to use this command.');

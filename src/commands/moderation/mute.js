@@ -50,7 +50,8 @@ const execute = async(c, d, a) => {
 
   try {
     await c.muteMember(d.guild_id, memberId, duration);
-    await c.reply(d, `Muted <@${memberId}>`);
+    await c.reply(d, `<@!${d.author.id}>\nMuted <@${memberId}>`);
+    await c.deleteMessage(d.channel_id, d.id);
   } catch (error) {
     console.warn(error);
     c.reply(d, `Failed to mute <@${memberId}>`).catch(console.warn);

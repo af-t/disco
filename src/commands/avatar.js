@@ -28,11 +28,11 @@ const execute = async (c, m, a) => {
   for (const uid of uids) {// Prosess ids to embeds
     let avatar, nick, title = titles[0];
     try {
-      const meta = await c.getGuildMember(m.guild_id, uid);
+      const meta = (m.member && uid === m.author.id) ? m.member : await c.getGuildMember(m.guild_id, uid);
       avatar = meta.avatar || meta.user.avatar;
       nick = meta.nick || meta.user.username;
 
-      if (!(avatar && nick)) throw ''; // the part that will probably never triggered
+      if (!(avatar && nick)) throw 1; // the part that will probably never triggered
     } catch {
       try {
         const meta = await c.getUser(uid);

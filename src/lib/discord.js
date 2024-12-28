@@ -428,6 +428,10 @@ export class Discord extends EventEmitter {
   }
 
   async deleteMessage(channel_id, message_id) {
+    if (!message_id && (channel_id.channel_id && channel_id.id)) {
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('DELETE', `/channels/${channel_id}/messages/${message_id}`);
   }
 
@@ -549,18 +553,38 @@ export class Discord extends EventEmitter {
   }
 
   async addReaction(channel_id, message_id, emoji) {
+    if (isNaN(Number(message_id)) && (channel_id.channel_id && channel_id.id)) {
+      emoji = message_id;
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('PUT', `/channels/${channel_id}/messages/${message_id}/reactions/${emoji}/@me`);
   }
 
   async removeReaction(channel_id, message_id, emoji, user_id = '@me') {
+    if (isNaN(Number(message_id)) && (channel_id.channel_id && channel_id.id)) {
+      user_id = emoji || '@me';
+      emoji = message_id;
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('DELETE', `/channels/${channel_id}/messages/${message_id}/reactions/${emoji}/${user_id}`);
   }
 
   async getReactions(channel_id, message_id, emoji) {
+    if (isNaN(Number(message_id)) && (channel_id.channel_id && channel_id.id)) {
+      emoji = message_id;
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('GET', `/channels/${channel_id}/messages/${message_id}/reactions/${emoji}`);
   }
 
   async removeAllReactions(channel_id, message_id) {
+    if (!message_id && (channel_id.channel_id && channel_id.id)) {
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('DELETE', `/channels/${channel_id}/messages/${message_id}/reactions`);
   }
 
@@ -779,10 +803,18 @@ export class Discord extends EventEmitter {
   }
 
   async pinMessage(channel_id, message_id) {
+    if (!message_id && (channel_id.channel_id && channel_id.id)) {
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('PUT', `/channels/${channel_id}/pins/${message_id}`);
   }
 
   async unpinMessage(channel_id, message_id) {
+    if (!message_id && (channel_id.channel_id && channel_id.id)) {
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('DELETE', `/channels/${channel_id}/pins/${message_id}`);
   }
 
@@ -800,6 +832,10 @@ export class Discord extends EventEmitter {
   }
 
   async deleteScheduledMessage(channel_id, message_id) {
+    if (!message_id && (channel_id.channel_id && channel_id.id)) {
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('DELETE', `/channels/${channel_id}/messages/scheduled/${message_id}`);
   }
 
@@ -845,6 +881,10 @@ export class Discord extends EventEmitter {
   }
 
   async crosspostMessage(channel_id, message_id) {
+    if (!message_id && (channel_id.channel_id && channel_id.id)) {
+      message_id = channel_id.id;
+      channel_id = channel_id.channel_id;
+    }
     return this.makeRequest('POST', `/channels/${channel_id}/messages/${message_id}/crosspost`);
   }
 
