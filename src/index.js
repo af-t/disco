@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename); // import.meta.dirname alternative
 
 const DATABASE_PATH = rl(__dirname, '..', 'database');
-const COMMANDS_PATH = rl(__dirname, 'commands');
+const COMMANDS_PATH = rl(__dirname, '..', 'src', 'commands');
 const COMMAND_PREFIX = '.';
 
 const client = new Discord(process.env.DISCORD_TOKEN);

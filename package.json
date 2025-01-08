@@ -2,7 +2,7 @@
   "name": "disco",
   "version": "1.0.1",
   "description": "Discord bot application.",
-  "main": "src/index.js",
+  "main": "src/index.bun.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -27,7 +27,12 @@
   },
   "homepage": "https://github.com/af-t/disco#readme",
   "dependencies": {
-    "chatbot": "github:af-t/chatbot",
+    "chatbot": "github:af-t/chatbot"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.2",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.0",
     "dotenv": "^16.4.7",
     "ws": "^8.18.0"
   }
