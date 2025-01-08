@@ -121,11 +121,24 @@ client.on('MESSAGE_CREATE', async(m) => {
       allow = false;
     }
 
-    return !!allow ? client.commands[cmd.toLowerCase()]?.(client, m, args, rawArgs) : client.reply(m, 'Please check the permission to use this command.');
+    if (allow) {
+      const lcmd = cmd.toLowerCase();
+      if (lcmd in client.commands) {
+        await client.commands[lcmd]?.(client, m, args, rawArgs);
+        return;
+      } else {
+        await client.commands.ai?.(client, m, args, m.content.slice(1));
+        return;
+      }
+    } else {
+      await client.reply(m, 'Please check the permission to use this command.');
+      return;
+    }
   }
 
   if (useAI) {
-    return client.commands.ai?.(client, m, args, rawArgs);
+    await client.commands.ai?.(client, m, args, rawArgs);
+    return;
   }
 });
 

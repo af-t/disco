@@ -4,14 +4,12 @@ import { basename, dirname, join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { isMainThread } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as sleep } from 'node:timers/promises';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import fsS from 'node:fs'; //for synchronous operation
 import https from 'node:https';
 import crypto from 'node:crypto';
-
-// Helper function to simplify writing for sleep
-const sleep = (duration) => new Promise(resolve => setTimeout(resolve, duration));
 
 export class Discord extends EventEmitter {
   static RECONNECT_DELAY = 5000;

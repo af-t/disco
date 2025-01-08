@@ -1,6 +1,7 @@
 import ChatBot from 'chatbot';
 import path from 'node:path';
 import fs from 'node:fs';
+import {setTimeout} from 'node:timers/promises';
 
 const chatbot = new ChatBot(process.env.GEMINI_API_KEY);
 const users = new Map();
@@ -8,17 +9,11 @@ const users = new Map();
 //Helper function to create Id
 const gen = (channel_id, user_id) => `${channel_id}:${user_id}`;
 
-//Helper function to check channel lock status
-const islocked = (id) => {
-  const list = chatbot.listChannels();
-  return list.some(i => i === id);
-};
-
 //Helper function to send typing indicator to discord
 const startTyping = async(c, m, notify) => {
   while (notify?.()) {
     await c.sendTyping(m.channel_id).catch(_ => _);
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await setTimeout(5000);
   }
 };
 
@@ -32,11 +27,12 @@ const execute = async (c, m, _, a) => {
   }
 
   const channelId = users.get(keyId);
+
   let unlockKey;
   if (chatbot.channel !== channelId) do {
     unlockKey = chatbot.moveChannel(channelId, true);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  } while (!unlockKey && islocked(channelId));
+    await setTimeout(500);
+  } while (!unlockKey);
 
   if (m.attachments) for (const att of m.attachments) try {
     const fileData = await (await fetch(att.url)).arrayBuffer();
