@@ -1,10 +1,10 @@
-import { EventEmitter } from 'node:events';
-import { WebSocket } from 'ws';
-import { basename, dirname, join } from 'node:path';
-import { inflateSync } from 'node:zlib';
-import { isMainThread } from 'node:worker_threads';
-import { fileURLToPath } from 'node:url';
-import { setTimeout as sleep } from 'node:timers/promises';
+import {EventEmitter} from 'node:events';
+import {WebSocket} from 'ws';
+import {basename, dirname, join} from 'node:path';
+import {inflateSync} from 'node:zlib';
+import {isMainThread} from 'node:worker_threads';
+import {fileURLToPath} from 'node:url';
+import {setTimeout as sleep} from 'node:timers/promises';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import fsS from 'node:fs'; //for synchronous operation
@@ -14,7 +14,7 @@ import crypto from 'node:crypto';
 export class Discord extends EventEmitter {
   static RECONNECT_DELAY = 5000;
   static CACHE_AGE = 30000;
-  static CACHE_PATH = join(process.env.TMPDIR || process.env.TEMP || process.env.TMP || (fsS.existsSync('/tmp') ? '/tmp' : '.'), `message_cache.${Math.random().toString(36).slice(2)}`);
+  static CACHE_PATH = join(process.env.TMPDIR || process.env.TEMP || process.env.TMP || (fsS.existsSync('/tmp') ? '/tmp' : '.'), `message_cache.${process.pid}`);
   static HEARTBEAT_JITTER = 20;
   static API_VERSION = 'v10';
   static INTENT_BIT = 53608447;
@@ -23,8 +23,9 @@ export class Discord extends EventEmitter {
   static BOT_STATUS = 'online';
 
   // CACHE (permanent)
-  #removable = new Set(); // file cache
+  #reusable = new Map(); // file cache
   #checksums = new Map();
+  #cache = new TTLCache(600_000); //10 minutes
 
   constructor(token, intents, shard) {
     super();
@@ -104,7 +105,7 @@ export class Discord extends EventEmitter {
     if (message[0] === 0x78 && message[1] === 0x9c) message = inflateSync(message);
     message = JSON.parse(message);
 
-    const { t, s, op, d } = message;
+    const {t, s, op, d} = message;
 
     switch (op) {
       case 0:
@@ -263,6 +264,15 @@ export class Discord extends EventEmitter {
     throw Error(`Request failed after ${Discord.MAX_RETRIES} attempt${Discord.MAX_RETRIES > 1 ? 's' : ''}`);
   }
 
+  async #cacheableGet(endpoint) {
+    let cached = this.#cache.get(endpoint);
+    if (!cached) {
+      cached = await this.makeRequest('GET', endpoint);
+      this.#cache.set(endpoint, cached);
+    }
+    return cached;
+  }
+
   async #getFileInfo(file) {
     if (typeof file !== 'string') return file;
     if (file.startsWith('file:///')) {
@@ -271,14 +281,21 @@ export class Discord extends EventEmitter {
 
     let filename, filepath, file_size, checksum;
     if (file.startsWith('http://') || file.startsWith('https://')) {
-      const {pathname} = new URL(file);
-      const download = await (await fetch(file).catch(_ => _))?.arrayBuffer?.();
-      if (download) {
-        filename = basename(pathname) || 'message.bin';
-        file_size = download.size;
-        filepath = join(process.env.TEMP || process.env.TMP || process.env.TMPDIR || (fsS.existsSync('/tmp') ? '/tmp' : '.'), `${Date.now()}-${filename}`);
-        await fs.writeFile(filepath, Buffer.from(download));
-        this.#removable.add(filepath);
+      if (this.#reusable.has(file)) {
+        const temp = this.#reusable.get(file);
+        filename = basename(temp) || 'message.bin';
+        file_size = fsS.statSync(temp).size;
+        filepath = temp;
+      } else {
+        const {pathname} = new URL(file);
+        const download = await (await fetch(file).catch(_ => _))?.arrayBuffer?.();
+        if (download) {
+          filename = basename(pathname) || 'message.bin';
+          file_size = download.size;
+          filepath = join(process.env.TEMP || process.env.TMP || process.env.TMPDIR || (fsS.existsSync('/tmp') ? '/tmp' : '.'), `${Date.now()}.${filename}`);
+          await fs.writeFile(filepath, Buffer.from(download));
+          this.#reusable.set(file, filepath);
+        }
       }
     } else if (fsS.existsSync(file)) {
       filename = basename(file);
@@ -294,7 +311,7 @@ export class Discord extends EventEmitter {
       chsum.on('error', reject);
     });
 
-    return { filepath, filename, file_size, checksum };
+    return {filepath, filename, file_size, checksum};
   }
 
   async setSaveMessagePath(path) {
@@ -314,7 +331,7 @@ export class Discord extends EventEmitter {
   }
 
   async getUser(id) {
-    return this.makeRequest('GET', `/users/${id}`);
+    return this.#cacheableGet(`/users/${id}`);
   }
 
   async getMessage(channel_id, message_id) {
@@ -323,8 +340,8 @@ export class Discord extends EventEmitter {
       message = await this.makeRequest('GET', `/channels/${channel_id}/messages/${message_id}`);
     } catch {
       // alternative method
-      [message] = await this.getMessages(channel_id, { before: message_id, limit: 1 });
-      [message] = await this.getMessages(channel_id, { after: message.id, limit: 1 });
+      [message] = await this.getMessages(channel_id, {before: message_id, limit: 1});
+      [message] = await this.getMessages(channel_id, {after: message.id, limit: 1});
     }
     return message;
   }
@@ -334,8 +351,8 @@ export class Discord extends EventEmitter {
     return this.makeRequest('GET', `/channels/${channel_id}/messages?${params}`);
   }
 
-  async editMessage({ channel_id, id }, content, options) {
-    return this.makeRequest('PATCH', `/channels/${channel_id}/messages/${id}`, { content, ...options });
+  async editMessage({channel_id, id}, content, options) {
+    return this.makeRequest('PATCH', `/channels/${channel_id}/messages/${id}`, {content, ...options});
   }
 
   async sendMessage(channel_id, content, options) {
@@ -346,11 +363,11 @@ export class Discord extends EventEmitter {
       else options.attachments = attachments;
       delete options.files;
     }
-    return this.makeRequest('POST', `/channels/${channel_id}/messages`, { content, ...options });
+    return this.makeRequest('POST', `/channels/${channel_id}/messages`, {content, ...options});
   }
 
-  async reply({ channel_id, id }, content, mention = false, options = {}) {
-    return this.sendMessage(channel_id, content, { message_reference: { channel_id, message_id: id }, ...(mention ? {} : { allowed_mentions: {} }), ...options });
+  async reply({channel_id, id}, content, mention = false, options = {}) {
+    return this.sendMessage(channel_id, content, {message_reference: {channel_id, message_id: id}, ...(mention ? {} : {allowed_mentions: {} }), ...options});
   }
 
   async sendTyping(channel_id) {
@@ -365,17 +382,17 @@ export class Discord extends EventEmitter {
     const upload = [];
     for (let i = 0; i < files.length; i++) {
       if (!files[i].checksum) {
-        upload.push({ ...files[i], id: i });
+        upload.push({...files[i], id: i});
         continue;
       }
       if (!this.#checksums.has(files[i].checksum)) {
-        upload.push({ ...files[i], id: i });
+        upload.push({...files[i], id: i});
         continue;
       }
-      cached.push({ ...this.#checksums.get(files[i].checksum), id: i });
+      cached.push({...this.#checksums.get(files[i].checksum), id: i});
     }
 
-    const {attachments} = await this.makeRequest('POST', `/channels/${channel_id}/attachments`, { files: upload.map(f => ({ filename: f.filename, file_size: f.file_size })) });
+    const {attachments} = await this.makeRequest('POST', `/channels/${channel_id}/attachments`, {files: upload.map(f => ({filename: f.filename, file_size: f.file_size})) });
 
     for (let i = 0; i < attachments.length; i++) await new Promise((resolve, reject) => {
       const reader = fsS.createReadStream(files[i].filepath);
@@ -390,7 +407,7 @@ export class Discord extends EventEmitter {
         res.on('end', resolve);
       });
       req.on('error', reject);
-      reader.pipe(req, { end: true });
+      reader.pipe(req, {end: true});
     });
 
     attachments.forEach((item, index) => {
@@ -418,11 +435,11 @@ export class Discord extends EventEmitter {
   }
 
   async editChannelPosition(channel_id, position) {
-    return this.editChannel(channel_id, { position });
+    return this.editChannel(channel_id, {position});
   }
 
   async editChannelTopic(channel_id, topic) {
-    return this.editChannel(channel_id, { topic });
+    return this.editChannel(channel_id, {topic});
   }
 
   async deleteMessage(channel_id, message_id) {
@@ -434,7 +451,7 @@ export class Discord extends EventEmitter {
   }
 
   async bulkDeleteMessages(channel_id, messages) {
-    return this.makeRequest('POST', `/channels/${channel_id}/messages/bulk-delete`, { messages });
+    return this.makeRequest('POST', `/channels/${channel_id}/messages/bulk-delete`, {messages});
   }
 
   async createChannel(guild_id, options) {
@@ -446,7 +463,7 @@ export class Discord extends EventEmitter {
   }
 
   async getChannel(channel_id) {
-    return this.makeRequest('GET', `/channels/${channel_id}`);
+    return this.#cacheableGet(`/channels/${channel_id}`);
   }
 
   async getChannels(guild_id) {
@@ -454,7 +471,7 @@ export class Discord extends EventEmitter {
   }
 
   async getGuild(guild_id) {
-    return this.makeRequest('GET', `/guilds/${guild_id}`);
+    return this.#cacheableGet(`/guilds/${guild_id}`);
   }
 
   async getGuildPreview(guild_id) {
@@ -478,7 +495,7 @@ export class Discord extends EventEmitter {
   }
 
   async getWebhook(webhook_id) {
-    return this.makeRequest('GET', `/webhooks/${webhook_id}`)
+    return this.#cacheableGet(`/webhooks/${webhook_id}`);
   }
 
   async executeWebhook(webhook_id, webhook_token, options = {}, wait = false) {
@@ -493,7 +510,7 @@ export class Discord extends EventEmitter {
   }
 
   async getRoles(guild_id) {
-    return this.makeRequest('GET', `/guilds/${guild_id}/roles`);
+    return this.#cacheableGet(`/guilds/${guild_id}/roles`);
   }
 
   async createRole(guild_id, options) {
@@ -509,7 +526,7 @@ export class Discord extends EventEmitter {
   }
 
   async getGuildMember(guild_id, user_id) {
-    return this.makeRequest('GET', `/guilds/${guild_id}/members/${user_id}`);
+    return this.#cacheableGet(`/guilds/${guild_id}/members/${user_id}`);
   }
 
   async getGuildMembers(guild_id, options = {}) {
@@ -518,7 +535,7 @@ export class Discord extends EventEmitter {
   }
 
   async kickMember(guild_id, user_id, reason) {
-    return this.makeRequest('DELETE', `/guilds/${guild_id}/members/${user_id}`, { reason });
+    return this.makeRequest('DELETE', `/guilds/${guild_id}/members/${user_id}`, {reason});
   }
 
   async banMember(guild_id, user_id, options = {}) {
@@ -531,15 +548,15 @@ export class Discord extends EventEmitter {
 
   async muteMember(guild_id, user_id, duration = 0) {
     const timeoutUntil = new Date(Date.now() + duration).toISOString();
-    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, { communication_disabled_until: timeoutUntil });
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, {communication_disabled_until: timeoutUntil});
   }
 
   async unmuteMember(guild_id, user_id) {
-    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, { communication_disabled_until: null });
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, {communication_disabled_until: null});
   }
 
   async getGuildEmojis(guild_id) {
-    return this.makeRequest('GET', `/guilds/${guild_id}/emojis`);
+    return this.#cacheableGet(`/guilds/${guild_id}/emojis`);
   }
 
   async createEmoji(guild_id, options) {
@@ -709,7 +726,7 @@ export class Discord extends EventEmitter {
   }
 
   async createStageInstance(channel_id, options) {
-    return this.makeRequest('POST', `/stage-instances`, { channel_id, ...options });
+    return this.makeRequest('POST', `/stage-instances`, {channel_id, ...options});
   }
 
   async getStageInstance(channel_id) {
@@ -761,7 +778,7 @@ export class Discord extends EventEmitter {
   }
 
   async addFriend(username, discriminator) {
-    return this.makeRequest('POST', '/users/@me/relationships', { username, discriminator });
+    return this.makeRequest('POST', '/users/@me/relationships', {username, discriminator});
   }
 
   async removeFriend(user_id) {
@@ -769,11 +786,11 @@ export class Discord extends EventEmitter {
   }
 
   async blockUser(user_id) {
-    return this.makeRequest('PUT', `/users/@me/relationships/${user_id}`, { type: 2 });
+    return this.makeRequest('PUT', `/users/@me/relationships/${user_id}`, {type: 2});
   }
 
   async setUserNote(user_id, note) {
-    return this.makeRequest('PUT', `/users/@me/notes/${user_id}`, { note });
+    return this.makeRequest('PUT', `/users/@me/notes/${user_id}`, {note});
   }
 
   async getUserNote(user_id) {
@@ -781,7 +798,7 @@ export class Discord extends EventEmitter {
   }
 
   async createDM(recipient_id) {
-    return this.makeRequest('POST', '/users/@me/channels', { recipient_id });
+    return this.makeRequest('POST', '/users/@me/channels', {recipient_id});
   }
 
   async closeDM(channel_id) {
@@ -859,7 +876,7 @@ export class Discord extends EventEmitter {
   }
 
   async setChannelNSFW(channel_id, nsfw) {
-    return this.makeRequest('PATCH', `/channels/${channel_id}`, { nsfw });
+    return this.makeRequest('PATCH', `/channels/${channel_id}`, {nsfw});
   }
 
   async createForumPost(channel_id, options) {
@@ -997,7 +1014,7 @@ export class Discord extends EventEmitter {
   }
 
   async modifyVanityURL(guild_id, code) {
-    return this.makeRequest('PATCH', `/guilds/${guild_id}/vanity-url`, { code });
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/vanity-url`, {code});
   }
 
   /**
@@ -1006,8 +1023,12 @@ export class Discord extends EventEmitter {
   cleanup() {
     this._messages.migrateSync?.(); // save message data in memory to disk
     this._messages._start = false; // prevent infinite loop
-    this.#removable.forEach(f => fsS.rmSync(f)); // delete temporary files
-    fsS.rmSync(Discord.CACHE_PATH, { recursive: true }); // delete temporary cache directory
+    this.#cache._start = false;
+    this.#reusable.forEach((v, k) => {// delete temporary files
+      fsS.rmSync(v);
+      this.#reusable.delete(k);
+    });
+    fsS.rmSync(Discord.CACHE_PATH, {recursive: true}); // delete temporary cache directory
   }
 }
 
@@ -1018,7 +1039,7 @@ class MessageCache {
     this._storage = new Map();
 
     this.#init();
-    this.#startCollector();
+    this.#startLoop();
   }
 
   add(message) {
@@ -1041,7 +1062,7 @@ class MessageCache {
 
   clear() {
     this._storage.clear();
-    if (this._dbPath && fsS.existsSync(this._dbPath)) fsS.rmSync(this._dbPath, { recursive: true });
+    if (this._dbPath && fsS.existsSync(this._dbPath)) fsS.rmSync(this._dbPath, {recursive: true});
   }
 
   load(path) {
@@ -1066,8 +1087,8 @@ class MessageCache {
   }
 
   #init() {
-    if (fsS.existsSync(this._dbPath)) load(this._dbPath);
-    if (this._dbPath) fsS.mkdirSync(this._dbPath, { recursive: true });
+    if (fsS.existsSync(this._dbPath)) this.load(this._dbPath);
+    if (this._dbPath) fsS.mkdirSync(this._dbPath, {recursive: true});
   }
 
   async #migrate() {
@@ -1079,7 +1100,7 @@ class MessageCache {
       if (Date.now() - value.update > this._dbAge && this._dbPath) {
         const target = join(this._dbPath, value.origin.channel_id, value.origin.id + '.json');
         try {
-          await fs.mkdir(dirname(target), { recursive: true });
+          await fs.mkdir(dirname(target), {recursive: true});
           await fs.writeFile(target, JSON.stringify(value.origin));
           this._storage.delete(key);
         } catch (error) {
@@ -1100,7 +1121,7 @@ class MessageCache {
       if (Date.now() - value.update > this._dbAge && this._dbPath) {
         const target = join(this._dbPath, value.origin.channel_id, value.origin.id + '.json');
         try {
-          fsS.mkdirSync(dirname(target), { recursive: true });
+          fsS.mkdirSync(dirname(target), {recursive: true});
           fsS.writeFileSync(target, JSON.stringify(value.origin));
           this._storage.delete(key);
         } catch {
@@ -1111,12 +1132,58 @@ class MessageCache {
     }
   }
 
-  async #startCollector() {
+  async #startLoop() {
     this._start = true;
     while (this._start) {
       await this.#migrate();
       await sleep(500);
     }
+  }
+}
+
+class TTLCache {
+  #db = new Map();
+
+  async #startLoop() {
+    this._start = true;
+    while (this._start) {
+      for (const [k, v] of this.#db) {
+        if (Date.now() > v.exp) this.#db.delete(k);
+      }
+      await sleep(100);
+    }
+  }
+
+  get(key) {
+    if (!this.#db.has(key)) return;
+    return this.#db.get(key).data;
+  }
+
+  set(key, data) {
+    this.renewAge(key);
+    const pre = this.#db.get(key);
+    pre.data = data;
+  }
+
+  clear() {
+    this.#db.clear();
+  }
+
+  renewAge(key) {
+    if (!this.#db.has(key)) {
+      const pre = {
+        exp: Date.now() + 600000,
+        data: null
+      };
+      this.#db.set(key, pre);
+    } else {
+      const pre = this.#db.get(key);
+      pre.exp = Date.now() + 600000;
+    }
+  }
+
+  constructor() {
+    this.#startLoop();
   }
 }
 
