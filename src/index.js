@@ -4,7 +4,7 @@ import tools from './lib/utility.js';
 import dotenv from 'dotenv';
 import fs from 'node:fs/promises';
 import permissionFlags from './lib/permission.js';
-import {join, dirname, resolve as rl} from 'node:path';
+import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 
@@ -13,8 +13,8 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename); // import.meta.dirname alternative
 
-const DATABASE_PATH = rl(__dirname, '..', 'database');
-const COMMANDS_PATH = rl(__dirname, '..', 'src', 'commands');
+const DATABASE_PATH = join(__dirname, '..', 'database');
+const COMMANDS_PATH = join(__dirname, '..', 'src', 'commands');
 const COMMAND_PREFIX = '.';
 
 const client = new Discord(process.env.DISCORD_TOKEN);
