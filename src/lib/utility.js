@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import { join, basename, dirname } from 'node:path';
-import { inspect } from 'node:util';
+import {join, basename, dirname} from 'node:path';
+import {inspect} from 'node:util';
 
 async function importCommands(path = '', sub = false) {
   if (typeof path !== 'string') throw TypeError('The "path" argument must be of type string.');

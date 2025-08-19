@@ -1021,14 +1021,17 @@ export class Discord extends EventEmitter {
    * Function to clean temporary storage, suitable for execution when the process exits or a crash occurs.
    */
   cleanup() {
-    this._messages.migrateSync?.(); // save message data in memory to disk
-    this._messages._start = false; // prevent infinite loop
+    if (this._messages) {
+      this._messages.migrateSync?.(); // save message data in memory to disk
+      this._messages._start = false; // prevent infinite loop
+    }
+
     this.#cache._start = false;
     this.#reusable.forEach((v, k) => {// delete temporary files
       fsS.rmSync(v);
       this.#reusable.delete(k);
     });
-    fsS.rmSync(Discord.CACHE_PATH, {recursive: true}); // delete temporary cache directory
+    fsS.rmSync(Discord.CACHE_PATH, {recursive: true, force: true}); // delete temporary cache directory
   }
 }
 

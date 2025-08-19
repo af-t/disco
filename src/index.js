@@ -33,9 +33,12 @@ const parseDM = async (message) => {
   if (!dmInfo.reading) {
     dmInfo.reading = true;
     return new Promise((resolve) => setTimeout(() => {
-      resolve({ useAI: true, rawArgs: dmInfo.contents.join('\n') });
+      resolve({
+        useAI: true,
+        rawArgs: dmInfo.contents.join('\n')
+      });
       client.tempDM.delete(userId);
-    }, 8000));
+    }, 7000));
   }
   return {};
 };
@@ -50,7 +53,7 @@ const parseMessage = (message) => {
     if (cmd) {
       args = args.slice(2);
       rawArgs = rawArgs.slice(1).trim().slice(cmd.length).trim();
-      return { cmd, args, rawArgs }
+      return {cmd, args, rawArgs}
     }
     return {};
   }
@@ -59,11 +62,11 @@ const parseMessage = (message) => {
     const cmd = args[0].slice(1).trim();
     args.shift();
     rawArgs = rawArgs.slice(1).trim().slice(cmd.length).trim();
-    return { cmd, args, rawArgs };
+    return {cmd, args, rawArgs};
   }
 
-  if (rawArgs.match(me)) { // AI trigger
-    return { useAI: true, rawArgs };
+  if (rawArgs.match(me)) { // Automatically use AI if bot is tagged
+    return {useAI: true, rawArgs};
   }
 
   return {};
