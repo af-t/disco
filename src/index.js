@@ -25,22 +25,21 @@ client.tempDM = new Map();
 const parseDM = async (message) => {
   const content = message?.content;
   const userId = message?.author?.id;
-  const dmInfo = client.tempDM.has(userId) ? client.tempDM.get(userId) : { contents: [], reading: false };
+  const dm = client.tempDM.get(userid) || {contents: [], reading: false};
 
-  dmInfo.contents.push(content);
-  client.tempDM.set(userId, dmInfo);
+  dm.content.push(content);
+  client.tempDM.set(userid, dm);
 
-  if (!dmInfo.reading) {
-    dmInfo.reading = true;
-    return new Promise((resolve) => setTimeout(() => {
-      resolve({
-        useAI: true,
-        rawArgs: dmInfo.contents.join('\n')
-      });
-      client.tempDM.delete(userId);
-    }, 7000));
-  }
-  return {};
+  if (dm.reading) return {};
+
+  dm.reading = true;
+  return new Promise((resolve) => setTimeout(() => {
+    client.tempDM.delete(userid); // delete first
+    resolve({
+      useAI: true,
+      rawArgs: dm.contents.join('\n')
+    });
+  }, 7000));
 };
 
 const parseMessage = (message) => {
@@ -65,7 +64,7 @@ const parseMessage = (message) => {
     return {cmd, args, rawArgs};
   }
 
-  if (rawArgs.match(me)) { // Automatically use AI if bot is tagged
+  if (rawArgs.match(me)) { // Automatically use AI if bot is mentioned
     return {useAI: true, rawArgs};
   }
 
@@ -148,7 +147,5 @@ client.on('MESSAGE_CREATE', async(m) => {
 client.connect();
 
 process.on('exit', () => client.cleanup());
-process.on('SIGTERM', () => process.exit());
-process.on('SIGINT', () => process.exit());
-process.on('uncaughtException', (error) => console.warn(error));
-process.on('unhandledRejection', (error) => console.warn(error));
+['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, () => process.exit()));
+['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));
