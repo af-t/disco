@@ -144,7 +144,7 @@ client.on('MESSAGE_CREATE', async(m) => {
   }
 });
 
-client.connect();
+client.ready();
 
 ['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, () => client.destroy()));
 ['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));

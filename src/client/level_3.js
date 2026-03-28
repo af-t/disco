@@ -14,7 +14,7 @@ class DiscordClient extends level2 {
     if (options.attachments) {
       options.attachments = await this.uploadToDiscord(channel_id, options.attachments);
     }
-    return this._makeRequest('POST', `/channels/${channel_id}/messages`, { content, ...options });
+    return this.makeRequest('POST', `/channels/${channel_id}/messages`, { content, ...options });
   }
 
   async uploadToDiscord(channel_id, files = []) {
@@ -31,7 +31,7 @@ class DiscordClient extends level2 {
       upload.push({ ...files[i], id: i });
     }
 
-    const { attachments } = await this._makeRequest(
+    const { attachments } = await this.makeRequest(
       'POST',
       `/channels/${channel_id}/messages`,
       {
@@ -81,7 +81,7 @@ class DiscordClient extends level2 {
         const { pathname } = new URL(file);
         const req = await fetch(file);
         result.filename = path.basename(pathname);
-        result.filepath = path.join(os.tmpdir(), process.pid, result.filename);
+        result.filepath = path.join(os.tmpdir(), String(process.pid), result.filename);
 
         fs.mkdirSync(path.dirname(result.filepath), { recursive: true });
         const stream = fs.createWriteStream(result.filepath);
@@ -109,8 +109,20 @@ class DiscordClient extends level2 {
     return result;
   }
 
+  async reply({ channel_id, id }, content, mention = false, options = {}) {
+    return this.sendMessage(
+      channel_id,
+      content,
+      {
+        message_reference: { channel_id, message_id: id },
+        ...(mention ? {} : { allowed_mentions: {} }),
+        ...options
+      }
+    );
+  }
+
   async destroy() {
-    await fs.promises.rm(path.join(os.tmpdir(), process.pid), { recursive: true });
+    await fs.promises.rm(path.join(os.tmpdir(), String(process.pid)), { recursive: true, force: true });
     return super.destroy();
   }
 }

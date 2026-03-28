@@ -16,7 +16,7 @@ class DiscordClient extends level1 {
       method,
       body: (() => {
         try {
-          body = JSON.parse(body);
+          body = JSON.stringify(body);
         } finally {
           return body;
         }
@@ -108,11 +108,11 @@ class DiscordClient extends level1 {
     return this.editChannel(channel_id, { topic });
   }
 
-  async deleteMessage(id, channel_id) {
+  async deleteMessage(channel_id, id) {
     return this.makeRequest('DELETE', `/channels/${channel_id}/messages/${id}`);
   }
 
-  async bulkDeleteMessages(messages, channel_id) {
+  async bulkDeleteMessages(channel_id, messages) {
     return this.makeRequest('POST', `/channels/${channel_id}/messages/bulk-delete`, { messages });
   }
 
