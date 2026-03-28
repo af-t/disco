@@ -1,4 +1,4 @@
-import Discord from './lib/discord.js';
+import Discord from './client/level_3.js';
 import tools from './lib/utility.js';
 //import webhook from './lib/client/webhook.js';
 import dotenv from 'dotenv';
@@ -17,7 +17,7 @@ const DATABASE_PATH = join(__dirname, '..', 'database');
 const COMMANDS_PATH = join(__dirname, '..', 'src', 'commands');
 const COMMAND_PREFIX = '.';
 
-const client = new Discord(process.env.DISCORD_TOKEN);
+const client = new Discord(process.env.DISCORD_TOKEN, null, null, { diskPath: DATABASE_PATH });
 
 client.commands = await tools.importCommands(COMMANDS_PATH);
 client.tempDM = new Map();
@@ -146,6 +146,5 @@ client.on('MESSAGE_CREATE', async(m) => {
 
 client.connect();
 
-process.on('exit', () => client.cleanup());
-['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, () => process.exit()));
+['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, () => client.destroy()));
 ['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));

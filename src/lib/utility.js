@@ -5,25 +5,25 @@ import {inspect} from 'node:util';
 async function importCommands(path = '', sub = false) {
   if (typeof path !== 'string') throw TypeError('The "path" argument must be of type string.');
 
-  const lists = fs.readdirSync(path, { withFileTypes: true });
+  const entries = fs.readdirSync(path, { withFileTypes: true });
   const commands = {};
   const start = Date.now();
 
   let loaded = 0;
 
-  for (const item of lists) {
-    const fullpath = join(path, item.name);
-    const pathname = basename(path);
+  for (const entry of entries) {
+    const filepath = join(path, entry.name);
+    const filename = basename(path);
 
-    if (item.isDirectory()) {
-      const [_commands, _loaded] = await importCommands(fullpath, true);
+    if (entry.isDirectory()) {
+      const [_commands, _loaded] = await importCommands(filepath, true);
       for (const key in _commands) commands[key] = _commands[key];
       loaded += _loaded;
       continue;
     }
 
     try {
-      let mod = await import(fullpath);
+      let mod = await import(filepath);
       mod = mod.default || mod;
 
       if (mod?.data?.name && mod?.execute) {
@@ -47,10 +47,10 @@ async function importCommands(path = '', sub = false) {
         commands[mod.data.name.toLowerCase()] = command;
         loaded++;
       } else {
-        console.warn(`${item.name}: does not have the appropriate property`);
+        console.warn(`${entry.name}: does not have the appropriate property`);
       }
     } catch (error) {
-      console.warn(`Can't load file:`, item.name);
+      console.warn(`Can't load file:`, entry.name);
       console.error(error);
       //console.error(error.stack);
     }

@@ -1,0 +1,289 @@
+import StorageManager from '../lib/store.js';
+import zlib from 'node:zlib';
+import { WebSocket } from 'ws';
+import { EventEmitter } from 'node:events';
+
+const GATEWAY          = 'wss://gateway.discord.gg';
+const INTENT_BITS      = 53608447;
+const RECONNECT_DELAY  = 5000;
+const RECONNECT_LIMIT  = 3;
+
+class DiscordClient extends EventEmitter {
+  _initPromise      = null;
+  _store            = null;
+  _session          = {};
+  _guilds           = new Set();
+  _gatewayUrl       = GATEWAY;
+  _gatewayParams    = '?v=10&encoding=json';
+  _ws               = null;
+  _heartbeat        = null;    // setInterval handle
+  _heartbeatJitter  = null;    // setTimeout handle for the first jittered beat
+  _reconnectTimer   = null;    // setTimeout handle for reconnect delay
+  _reconnectAttempt = 0;
+  _initialised      = false;
+  _temps            = new Map();
+  _destroyed        = false;   // prevents reconnect after destroy()
+
+  status = 'closed';
+
+  /**
+   * @param {string}   token       Discord bot token
+   * @param {number[]} [intentBits] Array of intent bit values to OR together
+   * @param {number[]} [shardId]   [shardId, numShards]
+   * @param {object}   [config]    Passed through to StorageManager
+   */
+  constructor(token, intentBits, shardId, config = {}) {
+    super();
+
+    if (!token?.trim?.()) throw new Error('Token is required');
+    this.token   = token;
+    this.intents = intentBits?.length
+      ? intentBits.reduce((a, b) => a | b)
+      : INTENT_BITS;
+    this.shardId = shardId ?? [0, 1];
+    this.config  = config;
+  }
+
+  async _init() {
+    this._store = new StorageManager(this.config);
+    await this._store.ready();
+    this._initialised = true;
+    this.connect();
+  }
+
+  /** Call once before using the gateway. Idempotent and concurrency-safe. */
+  async ready() {
+    if (this._initialised) return;
+    if (this._initPromise) return this._initPromise;
+
+    this._initPromise = this._init();
+    try {
+      await this._initPromise;
+    } finally {
+      this._initPromise = null;
+    }
+  }
+
+  connect() {
+    if (this._destroyed)    throw new Error('Cannot reconnect a destroyed gateway — create a new instance');
+    if (!this._initialised) throw new Error('Call ready() before connecting');
+
+    // Tear down any existing socket cleanly before opening a new one.
+    if (this._ws) {
+      this._ws.removeAllListeners();
+      if (this._ws.readyState < WebSocket.CLOSING) this._ws.terminate();
+      this._ws = null;
+    }
+
+    this._ws = new WebSocket(this._gatewayUrl + this._gatewayParams);
+    this.emit('CONNECT');
+    this.status = 'connecting';
+
+    this._ws.on('open',    this._onOpen.bind(this));
+    this._ws.on('message', this._onMessage.bind(this));
+    this._ws.on('error',   this._onError.bind(this));
+    this._ws.on('close',   this._onClose.bind(this));
+  }
+
+  /**
+   * Permanently shut down this gateway instance.
+   * Awaitable — resolves once the store is cleanly closed.
+   */
+  async destroy() {
+    this._destroyed = true;
+
+    // Cancel any pending reconnect so _onClose doesn't race us.
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
+
+    this._clearHeartbeat();
+
+    if (this._ws) {
+      this._ws.removeAllListeners();
+      this._ws.close(1000, 'Client destroyed');
+      this._ws = null;
+    }
+
+    if (this._store) {
+      await this._store.close();
+      this._store = null;
+    }
+
+    this._session = {};
+    this._guilds.clear();
+    this._temps.clear();
+    this._initialised      = false;
+    this._reconnectAttempt = 0;
+    this.status            = 'closed';
+
+    this.removeAllListeners();
+  }
+
+  get me()          { return this._session.user; }
+  get application() { return this._session.application; }
+  get guilds()      { return new Set(this._guilds); }
+
+  _onOpen() {
+    this._session.id ? this._resume() : this._identify();
+    this.emit('OPEN');
+  }
+
+  async _onMessage(msg) {
+    try {
+      if (Buffer.isBuffer(msg) && msg[0] === 0x78) {
+        msg = await this._decompress(msg);
+      }
+
+      const { t, s, op, d } = JSON.parse(msg);
+
+      switch (op) {
+        case 0:  // Dispatch
+          this._handleDispatch(t, d);
+          break;
+        case 7:  // Server-requested reconnect — keep session, reconnect with resume
+          this._ws.terminate();
+          break;
+        case 9:  // Invalid session
+          // d=true means the session can be resumed; d=false means start fresh.
+          d ? this._resume() : this._reset();
+          break;
+        case 10: // Hello
+          this._setupHeartbeat(d.heartbeat_interval);
+          break;
+        case 11: // Heartbeat ACK
+          this.emit('ACK_NOTIFY');
+          break;
+      }
+
+      if (s != null) this._session.seq = s;
+    } catch (err) {
+      this.emit('ERROR', err);
+    }
+  }
+
+  _handleDispatch(evName, evData) {
+    switch (evName) {
+      case 'READY':
+        this.status                 = 'ready';
+        this._session.id            = evData.session_id;
+        this._session.user          = evData.user;
+        this._session.application   = evData.application;
+        this._gatewayUrl            = evData.resume_gateway_url;
+        this._reconnectAttempt      = 0;
+        break;
+      case 'GUILD_CREATE': this._guilds.add(evData.id);    break;
+      case 'GUILD_DELETE': this._guilds.delete(evData.id); break;
+      case 'MESSAGE_CREATE':
+        this._store?.set(`${evData.channel_id}:${evData.id}`, evData);
+        break;
+    }
+
+    this.emit(evName, evData);
+  }
+
+  _onClose(code, reason) {
+    const reasonStr = reason?.toString() || this._ws?._closeReason || 'no reason';
+    this.emit('CLOSE', code, reasonStr);
+
+    this._ws?.removeAllListeners();
+    this._clearHeartbeat();
+    this.status = 'closed';
+
+    if (this._destroyed) return;
+
+    if (++this._reconnectAttempt >= RECONNECT_LIMIT) {
+      this._reconnectAttempt = 0;
+      this.emit('RECONNECT_FAILED', 'Reconnect limit reached — giving up');
+    } else {
+      this._reconnectTimer = setTimeout(() => {
+        this._reconnectTimer = null;
+        if (!this._destroyed) this.connect();
+      }, RECONNECT_DELAY);
+    }
+  }
+
+  _onError(err) {
+    this._ws._closeReason = err.message;
+    this.emit('ERROR', err);
+  }
+
+  _sendHeartbeat() {
+    if (this._ws?.readyState !== WebSocket.OPEN) return;
+    this._ws.send(JSON.stringify({
+      op: 1,
+      d: this._session.seq ?? null,
+    }));
+  }
+
+  _setupHeartbeat(interval) {
+    this._clearHeartbeat();
+
+    // the first beat fires (e.g. if close arrives during the jitter window).
+    this._heartbeatJitter = setTimeout(() => {
+      this._heartbeatJitter = null;
+      this._sendHeartbeat();
+      this._heartbeat = setInterval(this._sendHeartbeat.bind(this), interval);
+    }, Math.floor(Math.random() * interval));
+  }
+
+  _clearHeartbeat() {
+    clearTimeout(this._heartbeatJitter);
+    clearInterval(this._heartbeat);
+    this._heartbeatJitter = null;
+    this._heartbeat       = null;
+  }
+
+  _reset() {
+    this._gatewayUrl  = GATEWAY;
+    this._session.id  = null;
+    this._session.seq = null;
+    this._ws.terminate();
+  }
+
+  _resume() {
+    this._ws.send(JSON.stringify({
+      op: 6,
+      d: {
+        token:      this.token,
+        session_id: this._session.id,
+        seq:        this._session.seq,
+      },
+    }));
+  }
+
+  _identify() {
+    this._ws.send(JSON.stringify({
+      op: 2,
+      d: {
+        token:    this.token,
+        intents:  this.intents,
+        shard:    this.shardId,
+        compress: true,
+        properties: {
+          os:      process.platform,
+          browser: 'discord-gateway-js',
+          device:  'discord-gateway-js',
+        },
+      },
+    }));
+  }
+
+  _decompress(data) {
+    return new Promise((resolve, reject) => {
+      zlib.inflate(data, (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      });
+    });
+  }
+
+  async latency() {
+    const start = Date.now();
+    return new Promise((resolve) => {
+      this.once('ACK_NOTIFY', () => resolve(Date.now() - start));
+      this._sendHeartbeat(); // trigger
+    });
+  }
+}
+
+export default DiscordClient;
