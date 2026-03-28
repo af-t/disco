@@ -186,7 +186,30 @@ class DiscordClient extends level1 {
   }
 
   async kickMember(guild_id, user_id, reason) {
-    return this.makeRequest('DELETE', `/guilds/${guild_id}/members/${user_id}`, { reason });
+    const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
+    return this.makeRequest('DELETE', `/guilds/${guild_id}/members/${user_id}`, null, headers);
+  }
+
+  async banMember(guild_id, user_id, options = {}) {
+    let { reason, ...body } = options;
+    const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
+    return this.makeRequest('PUT', `/guilds/${guild_id}/bans/${user_id}`, body, headers);
+  }
+
+  async unbanMember(guild_id, user_id, reason) {
+    const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
+    return this.makeRequest('DELETE', `/guilds/${guild_id}/bans/${user_id}`, null, headers);
+  }
+
+  async muteMember(guild_id, user_id, duration = 0, reason) {
+    const timeoutUntil = new Date(Date.now() + duration).toISOString();
+    const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, { communication_disabled_until: timeoutUntil }, headers);
+  }
+
+  async unmuteMember(guild_id, user_id, reason) {
+    const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, { communication_disabled_until: null }, headers);
   }
 
   async addGuildMember(guild_id, user_id, options = {}) {
@@ -314,6 +337,202 @@ class DiscordClient extends level1 {
 
   async getThreadMembers(thread_id) {
     return this.makeRequest('GET', `/channels/${thread_id}/thread-members`);
+  }
+
+  async getGuildEmojis(guild_id) {
+    return this._cacheableGet(`/guilds/${guild_id}/emojis`);
+  }
+
+  async createEmoji(guild_id, options = {}) {
+    return this.makeRequest('POST', `/guilds/${guild_id}/emojis`, options);
+  }
+
+  async deleteEmoji(guild_id, emoji_id) {
+    return this.makeRequest('DELETE', `/guilds/${guild_id}/emojis/${emoji_id}`);
+  }
+
+  async getPinnedMessages(channel_id) {
+    return this.makeRequest('GET', `/channels/${channel_id}/pins`);
+  }
+
+  async pinMessage(channel_id, message_id) {
+    return this.makeRequest('PUT', `/channels/${channel_id}/pins/${message_id}`);
+  }
+
+  async unpinMessage(channel_id, message_id) {
+    return this.makeRequest('DELETE', `/channels/${channel_id}/pins/${message_id}`);
+  }
+
+  async getGuildAuditLog(guild_id, options = {}) {
+    const params = new URLSearchParams(options);
+    return this.makeRequest('GET', `/guilds/${guild_id}/audit-logs?${params}`);
+  }
+
+  async createDM(recipient_id) {
+    return this.makeRequest('POST', '/users/@me/channels', { recipient_id });
+  }
+
+  async setSlowMode(channel_id, seconds) {
+    return this.editChannel(channel_id, { rate_limit_per_user: seconds });
+  }
+
+  async executeWebhook(webhook_id, webhook_token, options = {}, wait = false) {
+    let endpoint = `/webhooks/${webhook_id}/${webhook_token}`;
+    if (wait) endpoint += '?wait=true';
+    return this.makeRequest('POST', endpoint, options);
+  }
+
+  async getGuildApplicationCommands(application_id, guild_id) {
+    return this._cacheableGet(`/applications/${application_id}/guilds/${guild_id}/commands`);
+  }
+
+  async createGuildApplicationCommand(application_id, guild_id, options) {
+    return this.makeRequest('POST', `/applications/${application_id}/guilds/${guild_id}/commands`, options);
+  }
+
+  async getGuildTemplates(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/templates`);
+  }
+
+  async createGuildTemplate(guild_id, options) {
+    return this.makeRequest('POST', `/guilds/${guild_id}/templates`, options);
+  }
+
+  async syncGuildTemplate(guild_id, template_code) {
+    return this.makeRequest('PUT', `/guilds/${guild_id}/templates/${template_code}`);
+  }
+
+  async getScheduledEvents(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/scheduled-events`);
+  }
+
+  async createScheduledEvent(guild_id, options) {
+    return this.makeRequest('POST', `/guilds/${guild_id}/scheduled-events`, options);
+  }
+
+  async cancelScheduledEvent(guild_id, event_id) {
+    return this.makeRequest('DELETE', `/guilds/${guild_id}/scheduled-events/${event_id}`);
+  }
+
+  async createStageInstance(channel_id, options = {}) {
+    return this.makeRequest('POST', '/stage-instances', { channel_id, ...options });
+  }
+
+  async getStageInstance(channel_id) {
+    return this.makeRequest('GET', `/stage-instances/${channel_id}`);
+  }
+
+  async deleteStageInstance(channel_id) {
+    return this.makeRequest('DELETE', `/stage-instances/${channel_id}`);
+  }
+
+  async getAutoModerationRules(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/auto-moderation/rules`);
+  }
+
+  async createAutoModerationRule(guild_id, options) {
+    return this.makeRequest('POST', `/guilds/${guild_id}/auto-moderation/rules`, options);
+  }
+
+  async deleteAutoModerationRule(guild_id, rule_id) {
+    return this.makeRequest('DELETE', `/guilds/${guild_id}/auto-moderation/rules/${rule_id}`);
+  }
+
+  async getVoiceRegions() {
+    return this.makeRequest('GET', '/voice/regions');
+  }
+
+  async moveUser(guild_id, user_id, channel_id) {
+    return this.modifyGuildMember(guild_id, user_id, { channel_id });
+  }
+
+  async setUserVoiceState(guild_id, user_id, options = {}) {
+    return this.modifyGuildMember(guild_id, user_id, { mute: options.mute, deaf: options.deaf });
+  }
+
+  async createCategory(guild_id, name) {
+    return this.createChannel(guild_id, { name, type: 4 });
+  }
+
+  async moveChannelToCategory(channel_id, category_id) {
+    return this.editChannel(channel_id, { parent_id: category_id });
+  }
+
+  async setChannelNSFW(channel_id, nsfw) {
+    return this.editChannel(channel_id, { nsfw });
+  }
+
+  async getArchivedThreads(channel_id, options = {}) {
+    const params = new URLSearchParams(options);
+    return this.makeRequest('GET', `/channels/${channel_id}/threads/archived/public?${params}`);
+  }
+
+  async followNewsChannel(channel_id, webhook_channel_id) {
+    return this.makeRequest('POST', `/channels/${channel_id}/followers`, { webhook_channel_id });
+  }
+
+  async getWelcomeScreen(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/welcome-screen`);
+  }
+
+  async modifyWelcomeScreen(guild_id, options) {
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/welcome-screen`, options);
+  }
+
+  async getVanityURL(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/vanity-url`);
+  }
+
+  async modifyVanityURL(guild_id, code) {
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/vanity-url`, { code });
+  }
+
+  async getApplicationRoleConnections(application_id) {
+    return this.makeRequest('GET', `/applications/${application_id}/role-connections/metadata`);
+  }
+
+  async updateApplicationRoleConnections(application_id, metadata) {
+    return this.makeRequest('PUT', `/applications/${application_id}/role-connections/metadata`, metadata);
+  }
+
+  async createForumPost(channel_id, options = {}) {
+    return this.createThread(channel_id, { ...options, type: 11 });
+  }
+
+  async getDiscoveryCategories() {
+    return this.makeRequest('GET', '/discovery/categories');
+  }
+
+  async updateDiscoveryMetadata(guild_id, options = {}) {
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/discovery-metadata`, options);
+  }
+
+  async getDiscoveryValidationInfo(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/discovery-metadata/validation`);
+  }
+
+  async getGuildBoosts(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/premium/subscriptions`);
+  }
+
+  async getBoostLevel(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/premium/tier`);
+  }
+
+  async getGuildInsights(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/insights`);
+  }
+
+  async createGuildFromTemplate(template_code, options = {}) {
+    return this.makeRequest('POST', `/guilds/templates/${template_code}`, options);
+  }
+
+  async getTemplateInfo(template_code) {
+    return this.makeRequest('GET', `/guilds/templates/${template_code}`);
+  }
+
+  async modifyGuildTemplate(guild_id, template_code, options = {}) {
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/templates/${template_code}`, options);
   }
 
   async getGuildIntegrations(guild_id) {

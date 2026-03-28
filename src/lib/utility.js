@@ -81,6 +81,26 @@ class Logger {
 
 console = Logger;
 
+async function importEvents(client, path = '') {
+  if (typeof path !== 'string') throw TypeError('The "path" argument must be of type string.');
+  const entries = fs.readdirSync(path, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) continue;
+    const filepath = join(path, entry.name);
+    try {
+      let mod = await import(filepath);
+      mod = mod.default || mod;
+      const eventName = entry.name.split('.')[0].toUpperCase();
+      client.on(eventName, (...args) => mod(client, ...args));
+    } catch (error) {
+      console.warn(`Can't load event file:`, entry.name);
+      console.error(error);
+    }
+  }
+}
+
 export default {
-  importCommands
+  importCommands,
+  importEvents
 }

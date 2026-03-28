@@ -53,7 +53,16 @@ const execute = async (client, msg, args) => {
     if (messages.length < 100 || hasTwoWeeksAgo) break;
   }
 
-  return deleted;
+  const finalDeleted = deleted;
+  
+  if (finalDeleted > 0) {
+    const reply = await client.sendMessage(msg.channel_id, `🧹 Deleted **${finalDeleted}** messages.`);
+    setTimeout(() => {
+      client.deleteMessage(msg.channel_id, reply.id).catch(() => {});
+    }, 3000);
+  }
+
+  return finalDeleted;
 };
 
 

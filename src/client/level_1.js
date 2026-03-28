@@ -161,7 +161,7 @@ class DiscordClient extends EventEmitter {
     }
   }
 
-  _handleDispatch(evName, evData) {
+  async _handleDispatch(evName, evData) {
     switch (evName) {
       case 'READY':
         this.status                 = 'ready';
@@ -174,7 +174,16 @@ class DiscordClient extends EventEmitter {
       case 'GUILD_CREATE': this._guilds.add(evData.id);    break;
       case 'GUILD_DELETE': this._guilds.delete(evData.id); break;
       case 'MESSAGE_CREATE':
-        this._store?.set(`${evData.channel_id}:${evData.id}`, evData);
+        this._store.set(`${evData.channel_id}:${evData.id}`, evData);
+        break;
+      case 'MESSAGE_UPDATE':
+        const old = await this._store.get(`${evData.channel_id}:${evData.id}`);
+        this._store.set(`${evData.channel_id}:${evData.id}`, evData);
+        this._store.set(`${evData.channel_id}:${evData.id}:old`, old, true);
+        break;
+      case 'MESSAGE_DELETE':
+        const msg = await this._store.get(`${evData.channel_id}:${evData.id}`);
+        this._store.set(`${evData.channel_id}:${evData.id}`, msg, true);
         break;
     }
 
