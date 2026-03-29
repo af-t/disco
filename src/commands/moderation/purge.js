@@ -1,70 +1,66 @@
 const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
 
-const execute = async (client, msg, args) => {
-  let count = Number(args[0]) + 1;
+const execute = async(client, msg, args) => {
+  const messagesToDelete = [];
+  let deleted = 0;
 
   if (msg.message_reference) {
     let messages = [];
     let after = msg.message_reference.message_id;
-    args[0] = 0;
 
     do {
       messages = await client.getMessages(msg.channel_id, { after, limit: 100 });
-      after = messages.at(-1)?.id; // Get the ID of the last message
-      args[0] += messages.length;
-    } while (messages.length === 100);
+      after = messages.at(-1)?.id;
+    } while (messages.length === 100 && after);
 
-    await client.deleteMessage(msg.channel_id, msg.message_reference.message_id);
+    messagesToDelete.push(...filter(messages));
+    messagesToDelete.push({ id: msg.message_reference.message_id });
 
-    delete msg.message_reference;
-    args[0]--;
-    return execute(client, msg, args);
-  }
+  } else {
+    const count = Number(args[0]);
+    if (isNaN(count) || count < 1) return client.deleteMessage(msg.channel_id, msg.id);
 
-  if (isNaN(count)) return client.deleteMessage(msg.channel_id, msg.id);
+    let remain = count;
+    let before = msg.id;
+    while (remain > 0) {
+      const messages = await client.getMessages(msg.channel_id, { before, limit: Math.min(count, 100) });
+      const filteredMsgs = filter(messages);
 
-  let deleted = 0;
-  let remain = count;
+      remain -= filteredMsgs.length;
+      messagesToDelete.push(...filteredMsgs);
 
-  while (remain > 0) {
-    const messages = await client.getMessages(msg.channel_id, { limit: Math.min(remain, 100) });
-    const twoWeeksAgo = Date.now() - twoWeeksMs;
-    let hasTwoWeeksAgo;
+      before = messages.at(-1)?.id;
 
-    const messagesToDelete = messages.filter(m => {
-      const timestamp = new Date(m.timestamp).getTime();
-      if (timestamp < twoWeeksAgo) {
-        hasTwoWeeksAgo = true;
-        return false; // Return false to exclude from messagesToDelete
-      }
-      return true;
-    });
-
-    deleted += messagesToDelete.length;
-    remain -= messagesToDelete.length; // Simplify remaining count calculation
-
-
-    if (messagesToDelete.length > 1) {
-      await client.bulkDeleteMessages(msg.channel_id, messagesToDelete.map(o => o.id));
-    } else if (messagesToDelete.length === 1) {
-      await client.deleteMessage(msg.channel_id, messagesToDelete[0].id);
+      if (messages.length !== filteredMsgs.length || !before) break;
     }
 
-    if (messages.length < 100 || hasTwoWeeksAgo) break;
+    messagesToDelete.push(msg);
   }
 
-  const finalDeleted = deleted;
-  
-  if (finalDeleted > 0) {
-    const reply = await client.sendMessage(msg.channel_id, `🧹 Deleted **${finalDeleted}** messages.`);
-    setTimeout(() => {
-      client.deleteMessage(msg.channel_id, reply.id).catch(() => {});
-    }, 3000);
+  for (let i = 0; i < messagesToDelete.length; i += 100) {
+    const chunk = messagesToDelete.slice(i, i + 100);
+    if (chunk.length > 1) {
+      await client.bulkDeleteMessages(msg.channel_id, chunk.map(x => x.id));
+    } else {
+      await client.deleteMessage(msg.channel_id, chunk[0].id);
+    }
+
+    deleted += chunk.length;
   }
 
-  return finalDeleted;
+  if (deleted > 0) {
+    const reply = await client.sendMessage(msg.channel_id, `🧹 Deleted **${deleted - 1}** messages.`);
+    setTimeout(() => client.deleteMessage(msg.channel_id, reply.id), 3_500);
+  }
 };
 
+const filter = (messages) => {
+  const twoWeeksAgo = Date.now() - twoWeeksMs;
+  return messages.filter((m) => {
+    const timestamp   = new Date(m.timestamp).getTime();
+    return timestamp >= twoWeeksAgo;
+  });
+};
 
 export default {
   data: {

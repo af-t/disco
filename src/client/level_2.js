@@ -14,13 +14,7 @@ class DiscordClient extends level1 {
 
     const options = {
       method,
-      body: (() => {
-        try {
-          body = JSON.stringify(body);
-        } finally {
-          return body;
-        }
-      })(),
+      body: body ? JSON.stringify(body) : undefined,
       headers: {
         'Authorization': `Bot ${this.token}`,
         'Content-Type': 'application/json',
@@ -69,15 +63,16 @@ class DiscordClient extends level1 {
     if (useFetch) {
       const msg = await this._cacheableGet(`/channels/${channel_id}/messages/${message_id}`);
       // update stored message data
-      await this._store.set(`${channel_id}:${id}`, msg);
+      await this._store.set(`${channel_id}:${message_id}`, msg);
 
       return msg;
     }
-    return this._store.get(`${channel_id}:${id}`);
+    return this._store.get(`${channel_id}:${message_id}`);
   }
 
-  async getMessages(channel_id) {
-    return this.makeRequest('GET', `/channels/${channel_id}/messages`);
+  async getMessages(channel_id, options = {}) {
+    const params = new URLSearchParams(options);
+    return this.makeRequest('GET', `/channels/${channel_id}/messages?${params}`);
   }
 
   async sendTyping(channel_id) {
@@ -132,8 +127,9 @@ class DiscordClient extends level1 {
     return this._cacheableGet(`/guilds/${guild_id}/channels`);
   }
 
-  async getGuild(guild_id) {
-    return this._cacheableGet(`/guilds/${guild_id}`);
+  async getGuild(guild_id, options = {}) {
+    const params = new URLSearchParams(options);
+    return this._cacheableGet(`/guilds/${guild_id}?${params}`);
   }
 
   async getGuildPreview(guild_id) {
@@ -283,8 +279,9 @@ class DiscordClient extends level1 {
     return this.makeRequest('DELETE', `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}/${user_id}`);
   }
 
-  async getReactions(channel_id, message_id, emoji) {
-    return this.makeRequest('GET', `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}`);
+  async getReactions(channel_id, message_id, emoji, options = {}) {
+    const params = new URLSearchParams(options);
+    return this.makeRequest('GET', `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}?${params}`);
   }
 
   async removeAllReactions(channel_id, message_id) {

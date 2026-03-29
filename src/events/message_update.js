@@ -1,14 +1,12 @@
 export default async (client, m) => {
   if (!m.guild_id || m.author?.bot) return;
 
-  // Cari channel log
-  const channels = await client.getChannels(m.guild_id);
-  const logChannel = channels.find(c => c.name === 'logs' || c.name === 'audit-log');
-  if (!logChannel) return;
+  const cached = await client._store.get(`${m.channel_id}:${m.id}:old`);
+  if (cached.content === m.content) return;
 
-  // Ambil data lama dari cache
-  const oldMsg = await client._store?.get(`${m.channel_id}:${m.id}:old`);
-  if (oldMsg?.content === m.content) return; // Jika tidak ada perubahan isi
+  const channels = await client.getChannels(m.guild_id);
+  const logChannel = channels.find(x => x.name === 'logs' || x.name === 'audit-log');
+  if (!logChannel) return;
 
   const embed = {
     title: '📝 Message Updated',
@@ -21,6 +19,5 @@ export default async (client, m) => {
     color: 0xffcc33,
     footer: { text: `User ID: ${m.author.id}` }
   };
-
   await client.sendMessage(logChannel.id, null, { embeds: [embed] });
 };

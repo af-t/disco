@@ -20,7 +20,7 @@ await tools.importEvents(client, EVENTS_PATH);
 
 client.tempDM = new Map();
 
-client.ready();
+await client.ready();
 
 ['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, () => client.destroy()));
 ['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));

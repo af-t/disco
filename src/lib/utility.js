@@ -30,11 +30,14 @@ async function importCommands(path = '', sub = false) {
         const command = (...args) => {
           console.debug('Execute command:', mod.data.name);
           return mod.execute?.(...args);
+        };
+
+        for (const key in mod.data) {
+          Object.defineProperty(command, key, {
+            enumerable: true,
+            get: () => mod.data[key]
+          });
         }
-        for (let key in mod.data) if (key !== 'aliases') Object.defineProperty(command, key, {
-          enumerable: true,
-          get: () => mod.data?.[key]
-        });
 
         if ('aliases' in mod.data && Array.isArray(mod.data.aliases)) for (const alias of mod.data.aliases) if (typeof alias === 'string') {
           if (alias in commands) {

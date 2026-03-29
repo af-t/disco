@@ -2,10 +2,10 @@ const execute = async (client, message) => {
   if (!message.guild_id) return client.reply(message, 'This command can only be used in a server.');
 
   try {
-    const guild = await client.getGuild(message.guild_id);
+    const guild = await client.getGuild(message.guild_id, { with_counts: true });
     const channels = await client.getChannels(message.guild_id);
     const roles = await client.getRoles(message.guild_id);
-    
+
     const embed = {
       title: `${guild.name} - Server Information`,
       thumbnail: { url: `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=1024` },
