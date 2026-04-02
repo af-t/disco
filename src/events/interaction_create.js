@@ -2,20 +2,7 @@ export default async (client, interaction) => {
   // Autocomplete handling (type 4)
   if (interaction.type === 4) {
     const { name, options } = interaction.data;
-    
-    // Helper to find the focused option recursively
-    const findFocused = (opts) => {
-      for (const opt of opts) {
-        if (opt.focused) return opt;
-        if (opt.options) {
-          const res = findFocused(opt.options);
-          if (res) return res;
-        }
-      }
-      return null;
-    };
-
-    const focused = options ? findFocused(options) : null;
+    const focused = options.find(opt => opt.focused);
     
     if (name === 'help' && focused && focused.name === 'command') {
       const query = focused.value.toLowerCase();
@@ -32,38 +19,6 @@ export default async (client, interaction) => {
         type: 8, // APPLICATION_COMMAND_AUTOCOMPLETE_RESULT
         data: { choices }
       });
-    }
-    return;
-  }
-
-  // MESSAGE_COMPONENT handling (type 3)
-  if (interaction.type === 3) {
-    const { custom_id } = interaction.data;
-    
-    if (custom_id === 'mod_accept_rules') {
-      const role_id = await client._store.get('config:rules_role_id');
-      if (!role_id) return client.createInteractionResponse(interaction.id, interaction.token, { type: 4, data: { content: "Rules role is not configured.", flags: 64 } });
-      
-      await client.addRoleToMember(interaction.guild_id, interaction.member.user.id, role_id);
-      return client.createInteractionResponse(interaction.id, interaction.token, { type: 4, data: { content: "You have accepted the rules!", flags: 64 } });
-    }
-
-    if (custom_id.startsWith('mod_role_')) {
-      const parts = custom_id.split('_'); // mod_role_type_label
-      const type = parts[2];
-      const label = parts[3];
-      const role_id = await client._store.get(`config:role:${type}:${label}`);
-      
-      if (!role_id) return client.createInteractionResponse(interaction.id, interaction.token, { type: 4, data: { content: "Role is not configured.", flags: 64 } });
-      
-      const hasRole = interaction.member.roles.includes(role_id);
-      if (hasRole) {
-        await client.removeRoleFromMember(interaction.guild_id, interaction.member.user.id, role_id);
-        return client.createInteractionResponse(interaction.id, interaction.token, { type: 4, data: { content: `Role [${label}] removed!`, flags: 64 } });
-      } else {
-        await client.addRoleToMember(interaction.guild_id, interaction.member.user.id, role_id);
-        return client.createInteractionResponse(interaction.id, interaction.token, { type: 4, data: { content: `Role [${label}] added!`, flags: 64 } });
-      }
     }
     return;
   }
