@@ -67,7 +67,16 @@ export default {
   execute,
   data: {
     name: 'avatar',
+    description: 'Get the avatar of a user or the server.',
     aliases: ['av', 'pp', 'pfp'],
-    usage: 'avatar [user]'
+    usage: 'avatar [user]',
+    options: [
+      {
+        name: 'user',
+        description: 'The user to get the avatar of',
+        type: 6, // USER type
+        required: false
+      }
+    ]
   }
 }

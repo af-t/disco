@@ -86,7 +86,7 @@ export default async(client, m) => {
           allow = allow ? (perms & perm) === perm : false;
           allow = allow || hasAdmin;
         } else {
-          console.warn(`Unknown permission ${perm} from command:`, cmd);
+          client.logger.warn(`Unknown permission ${perm} from command:`, cmd);
         }
       }
     } else {

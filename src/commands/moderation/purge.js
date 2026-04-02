@@ -49,8 +49,8 @@ const execute = async(client, msg, args) => {
   }
 
   if (deleted > 0) {
-    const reply = await client.sendMessage(msg.channel_id, `🧹 Deleted **${deleted - 1}** messages.`);
-    setTimeout(() => client.deleteMessage(msg.channel_id, reply.id), 3_500);
+    const reply = await client.reply(msg, `🧹 Deleted **${deleted - 1}** messages.`);
+    if (reply?.channel_id && reply?.id) setTimeout(() => client.deleteMessage(msg.channel_id, reply.id).catch(_ => _), 3_500);
   }
 };
 
@@ -65,9 +65,18 @@ const filter = (messages) => {
 export default {
   data: {
     name: 'purge',
+    description: 'Delete a specified number of messages from the channel.',
     aliases: ['rm', 'clean'],
     usage: 'purge [count]',
-    permissions: ['MANAGE_MESSAGES']
+    permissions: ['MANAGE_MESSAGES'],
+    options: [
+      {
+        name: 'count',
+        description: 'Number of messages to delete',
+        type: 4, // INTEGER type
+        required: false
+      }
+    ]
   },
   execute
 };

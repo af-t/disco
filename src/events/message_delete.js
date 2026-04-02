@@ -9,13 +9,13 @@ export default async (client, m) => {
 
     const embed = {
       title: '🗑️ Message Deleted',
-      description: `A message by <@${cached.author.id}> was deleted in <#${m.channel_id}>`,
+      description: `A message by <@${cached.author?.id}> was deleted in <#${m.channel_id}>`,
       fields: [
         { name: 'Content', value: cached.content }
       ],
       timestamp: new Date().toISOString(),
       color: 0xff4b2b,
-      footer: { text: `User ID: ${cached.author.id}` }
+      footer: { text: `User ID: ${cached.author?.id}` }
     };
     await client.sendMessage(logChannel.id, null, { embeds: [embed] });
   }

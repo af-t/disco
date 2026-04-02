@@ -42,7 +42,16 @@ export default {
   execute,
   data: {
     name: 'userinfo',
+    description: 'Show information about a user.',
     aliases: ['ui', 'whois', 'user'],
-    usage: 'userinfo [user]'
+    usage: 'userinfo [user]',
+    options: [
+      {
+        name: 'user',
+        description: 'The user to get the information of',
+        type: 6, // USER type
+        required: false
+      }
+    ]
   }
 };

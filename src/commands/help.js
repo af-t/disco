@@ -40,7 +40,17 @@ export default {
   execute,
   data: {
     name: 'help',
+    description: 'Show the list of available commands.',
     aliases: ['h'],
-    usage: 'help [command]'
+    usage: 'help [command]',
+    options: [
+      {
+        name: 'command',
+        description: 'The command to get help for',
+        type: 3, // STRING type
+        required: false,
+        autocomplete: true
+      }
+    ]
   }
 };

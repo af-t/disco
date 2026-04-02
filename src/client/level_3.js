@@ -109,7 +109,17 @@ class DiscordClient extends level2 {
     return result;
   }
 
-  async reply({ channel_id, id }, content, mention = false, options = {}) {
+  async reply(message, content, mention = false, options = {}) {
+    if (message.isInteraction && typeof message.reply === 'function') {
+      await message.reply(content, options);
+      return {
+        isInteractionResponse: true,
+        interactionToken: message.interactionToken,
+        channel_id: message.channel_id
+      };
+    }
+
+    const { channel_id, id } = message;
     return this.sendMessage(
       channel_id,
       content,

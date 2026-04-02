@@ -36,7 +36,22 @@ export default {
   execute,
   data: {
     name: 'ban',
-    usage: 'ban {users}',
-    permissions: ['BAN_MEMBERS']
+    description: 'Ban a user from the server.',
+    usage: 'ban {user} [reason]',
+    permissions: ['BAN_MEMBERS'],
+    options: [
+      {
+        name: 'user',
+        description: 'The user to ban',
+        type: 6, // USER type
+        required: true
+      },
+      {
+        name: 'reason',
+        description: 'The reason for the ban',
+        type: 3, // STRING type
+        required: false
+      }
+    ]
   }
 };

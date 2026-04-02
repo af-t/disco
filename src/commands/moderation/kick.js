@@ -39,7 +39,22 @@ export default {
   execute,
   data: {
     name: 'kick',
-    usage: 'kick {users}',
-    permissions: ['KICK_MEMBERS']
+    description: 'Kick a user from the server.',
+    usage: 'kick {user} [reason]',
+    permissions: ['KICK_MEMBERS'],
+    options: [
+      {
+        name: 'user',
+        description: 'The user to kick',
+        type: 6, // USER type
+        required: true
+      },
+      {
+        name: 'reason',
+        description: 'The reason for the kick',
+        type: 3, // STRING type
+        required: false
+      }
+    ]
   }
 };

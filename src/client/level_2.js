@@ -1,5 +1,5 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import level1 from './level_1.js';
-import fs from 'node:fs';
 
 const BASE_URL = 'https://discord.com/api/v10';
 const MAX_RETRIES = 3;
@@ -25,19 +25,23 @@ class DiscordClient extends level1 {
 
     for (let i = 0; i < MAX_RETRIES; i++) {
       try {
-        const res  = await fetch(targetUrl, options);
-        let data   = Buffer.from(await res.arrayBuffer());
+        const res = await fetch(targetUrl, options);
+        const buffer = await res.arrayBuffer();
+        let data;
         try {
-          data = JSON.parse(data);
-        } finally {
-          if (res.ok) return data;
-          throw data;
+          data = JSON.parse(Buffer.from(buffer));
+        } catch {
+          data = Buffer.from(buffer);
         }
+
+        if (res.ok) return data;
+        throw data;
       } catch (err) {
-        if (err?.retry_delay) {
-          await sleep(err.retry_delay * 1000);
-        } else
-        if (err?.cause?.name !== 'ConnectTimeoutError') {
+        if (err?.retry_after) {
+          await sleep(err.retry_after * 1000);
+          continue; // Retry after sleep
+        }
+        if (err?.cause?.name !== 'ConnectTimeoutError' && i === MAX_RETRIES - 1) {
           throw err;
         }
       }
@@ -79,7 +83,11 @@ class DiscordClient extends level1 {
     return this.makeRequest('POST', `/channels/${channel_id}/typing`);
   }
 
-  async editMessage({ id, channel_id }, content, options = {}) {
+  async editMessage(message, content, options = {}) {
+    if (message.isInteractionResponse) {
+      return this.editOriginalInteractionResponse(this._session.application.id, message.interactionToken, { content, ...options });
+    }
+    const { id, channel_id } = message;
     return this.makeRequest('PATCH', `/channels/${channel_id}/messages/${id}`, { content, ...options });
   }
 

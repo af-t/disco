@@ -39,7 +39,7 @@ class StoreManager {
     this.diskTTL   = this._validateInt(config.diskTTL)   ?? 1_200_000;
     this.diskPath  = config.diskPath || join(process.cwd(), 'storage', 'db');
     this.maxMemory = this._validateInt(config.maxMemory) ?? Math.floor(heapLimit * 0.3);
-    this.logger    = config.logger;
+    this.logger    = config.logger.createLogger('DATABASE');
   }
 
   async ready() {
@@ -293,7 +293,7 @@ class StoreManager {
           task = async () => {
             if (!this._metadata.has(key)) {
               this._stats.cache.misses++;
-              resolve(undefined);
+              resolve();
               return;
             }
 
@@ -302,11 +302,19 @@ class StoreManager {
             meta.lastAccess = Date.now();
 
             if (meta.location === LOCATION.DISK) {
+              if (!fsSync.existsSync(meta.locationFile)) {
+                const suff = meta.locationFile.includes('/') ? meta.locationFile.split('/').slice(-2).join('/') : meta.locationFile.split('\\').slice(-2).join('\\');
+                const newPath = join(this.diskPath, suff);
+                if (fsSync.existsSync(newPath)) {
+                  meta.locationFile = newPath;
+                }
+              }
+
               // Check TTL before paying the I/O cost of promotion
               if (Date.now() > meta.expired) {
                 this._stats.cache.misses++;
                 await this._delete(key);
-                resolve(undefined);
+                resolve();
                 return;
               }
 
@@ -326,7 +334,7 @@ class StoreManager {
                 this._stats.errors.diskRead++;
                 this._stats.cache.misses++;
                 this._log('error', 'disk read error for key', key, err);
-                resolve(undefined);
+                resolve();
               }
               return;
             }
@@ -386,7 +394,7 @@ class StoreManager {
 
       if (idleCycles >= 7) {
         idleCycles = 0;
-        this._log('info', 'idle: sleeping until notified');
+        //this._log('info', 'idle: sleeping until notified');
 
         // FIX: set _notifier synchronously, then check the queue one more
         // time inside the promise executor.  This closes the race window where
@@ -405,7 +413,7 @@ class StoreManager {
 
   async _startMaintainer() {
     while (this._active) {
-      await new Promise((resolve) => setTimeout(resolve, 7_500));
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
       if (!this._active) break;
 
       let cycle        = 0;

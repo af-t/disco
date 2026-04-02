@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 const GATEWAY          = 'wss://gateway.discord.gg';
 const INTENT_BITS      = 53608447;
 const RECONNECT_DELAY  = 5000;
-const RECONNECT_LIMIT  = 3;
+const RECONNECT_LIMIT  = 5;
 
 class DiscordClient extends EventEmitter {
   _initPromise      = null;
@@ -23,6 +23,7 @@ class DiscordClient extends EventEmitter {
   _initialised      = false;
   _temps            = new Map();
   _destroyed        = false;   // prevents reconnect after destroy()
+  _ackReceived      = true;
 
   status = 'closed';
 
@@ -151,6 +152,7 @@ class DiscordClient extends EventEmitter {
           this._setupHeartbeat(d.heartbeat_interval);
           break;
         case 11: // Heartbeat ACK
+          this._ackReceived = true;
           this.emit('ACK_NOTIFY');
           break;
       }
@@ -200,7 +202,7 @@ class DiscordClient extends EventEmitter {
     this.emit(evName, evData);
   }
 
-  _onClose(code, reason) {
+  async _onClose(code, reason) {
     const reasonStr = reason?.toString() || this._ws?._closeReason || 'no reason';
     this.emit('CLOSE', code, reasonStr);
 
@@ -209,6 +211,15 @@ class DiscordClient extends EventEmitter {
     this.status = 'closed';
 
     if (this._destroyed) return;
+
+    const nonResumable = [4004, 4010, 4011, 4012, 4013, 4014];
+    if (nonResumable.includes(code)) {
+      this._reset();
+    }
+
+    if (code === 4007 || code === 4009) {
+      this._reset();
+    }
 
     if (++this._reconnectAttempt >= RECONNECT_LIMIT) {
       this._reconnectAttempt = 0;
@@ -228,6 +239,19 @@ class DiscordClient extends EventEmitter {
 
   _sendHeartbeat() {
     if (this._ws?.readyState !== WebSocket.OPEN) return;
+
+    if (!this._ackReceived) {
+      const msg = 'Zombie connection detected (missed heartbeat ACK). Terminating...';
+      if (this.config?.logger?.createLogger) {
+        this.config.logger.createLogger('GATEWAY').warn(msg);
+      } else {
+        console.warn(msg);
+      }
+      this._ws.terminate();
+      return;
+    }
+
+    this._ackReceived = false;
     this._ws.send(JSON.stringify({
       op: 1,
       d: this._session.seq ?? null,
@@ -236,6 +260,7 @@ class DiscordClient extends EventEmitter {
 
   _setupHeartbeat(interval) {
     this._clearHeartbeat();
+    this._ackReceived = true;
 
     // the first beat fires (e.g. if close arrives during the jitter window).
     this._heartbeatJitter = setTimeout(() => {

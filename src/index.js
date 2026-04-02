@@ -13,14 +13,18 @@ const DATABASE_PATH = join(__dirname, '..', 'database');
 const COMMANDS_PATH = join(__dirname, '..', 'src', 'commands');
 const EVENTS_PATH = join(__dirname, '..', 'src', 'events');
 
-const client = new Discord(process.env.DISCORD_TOKEN, null, null, { diskPath: DATABASE_PATH });
+const client = new Discord(process.env.DISCORD_TOKEN, null, null, { diskPath: DATABASE_PATH, logger: tools.Logger });
 
-client.commands = await tools.importCommands(COMMANDS_PATH);
-await tools.importEvents(client, EVENTS_PATH);
-
+client.logger = new tools.Logger('GATEWAY');
 client.tempDM = new Map();
+await tools.importEvents(client, EVENTS_PATH);
 
 await client.ready();
 
-['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, () => client.destroy()));
+client.once("READY", async() => {
+  client.commands = await tools.importCommands(COMMANDS_PATH);
+  tools.deploySlashCommands(client, client.commands);
+});
+
+['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await client.destroy(); process.exit(0); }));
 ['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));

@@ -62,7 +62,22 @@ export default {
   execute,
   data: {
     name: 'mute',
+    description: 'Mute a member for a specified duration.',
     usage: 'mute {member} {duration}',
-    permissions: ['MUTE_MEMBERS']
+    permissions: ['MUTE_MEMBERS'],
+    options: [
+      {
+        name: 'member',
+        description: 'The member to mute',
+        type: 6, // USER type
+        required: true
+      },
+      {
+        name: 'duration',
+        description: 'Duration (e.g., 1h, 30m)',
+        type: 3, // STRING type
+        required: true
+      }
+    ]
   }
 };

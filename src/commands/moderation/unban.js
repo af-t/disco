@@ -36,7 +36,16 @@ export default {
   execute,
   data: {
     name: 'unban',
-    usage: 'unban {users}',
-    permissions: ['BAN_MEMBERS']
+    description: 'Unban a user from the server.',
+    usage: 'unban {user}',
+    permissions: ['BAN_MEMBERS'],
+    options: [
+      {
+        name: 'user',
+        description: 'The user ID to unban',
+        type: 3, // STRING type (since they are not in the guild, USER type might not work as easily with autocomplete if not cached)
+        required: true
+      }
+    ]
   }
 };

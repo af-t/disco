@@ -2,6 +2,52 @@ import fs from 'node:fs';
 import {join, basename, dirname} from 'node:path';
 import {inspect} from 'node:util';
 
+class Logger {
+  constructor(name) {
+    this.name = typeof name === 'string' ? name : 'unknown';
+  }
+
+  _format(c, ...args) {
+    return [`\x1b[0;${c}m*\x1b[m`, `[${this.name}]`, ...args.map(x => typeof x === 'string' ? x : inspect(x, null, 2, true))].join(' ');
+  }
+
+  _stdout(text) {
+    process.stdout.write(text + '\n');
+  }
+
+  _stderr(text) {
+    process.stderr.write(text + '\n');
+  }
+
+  log(...args) {
+    this._stdout(this._format(37, ...args));
+  }
+
+  warn(...args) {
+    this._stderr(this._format(33, ...args));
+  }
+
+  info(...args) {
+    this._stdout(this._format(36, ...args));
+  }
+
+  error(...args) {
+    this._stderr(this._format(31, ...args));
+  }
+
+  debug(...args) {
+    this._stdout(this._format(34, ...args));
+  }
+
+  createLogger(name) {
+    return Logger.createLogger(name);
+  }
+
+  static createLogger(name) {
+    return new Logger(name);
+  }
+}
+
 async function importCommands(path = '', sub = false) {
   if (typeof path !== 'string') throw TypeError('The "path" argument must be of type string.');
 
@@ -31,6 +77,8 @@ async function importCommands(path = '', sub = false) {
           console.debug('Execute command:', mod.data.name);
           return mod.execute?.(...args);
         };
+
+        command.data = mod.data;
 
         for (const key in mod.data) {
           Object.defineProperty(command, key, {
@@ -67,23 +115,6 @@ async function importCommands(path = '', sub = false) {
   }
 }
 
-class Logger {
-  static #formatArgs = (num, ...args) => `\x1b[0;${num}m*\x1b[m ${args.map(arg => (typeof arg === 'string') ? arg : inspect(arg, null, 2, true)).join(' ')}`;
-  static #cout = (str) => process.stdout.write(str + '\n');
-  static #cerr = (str) => process.stderr.write(str + '\n');
-
-  static log = (...args) => Logger.#cout(Logger.#formatArgs(37, ...args));
-  static warn = (...args) => Logger.#cerr(Logger.#formatArgs(33, ...args));
-  static error = (...args) => Logger.#cerr(Logger.#formatArgs(31, ...args));
-  static info = (...args) => Logger.#cout(Logger.#formatArgs(36, ...args));
-  static debug = (...args) => Logger.#cout(Logger.#formatArgs(34, ...args));
-  static time = console.time;
-  static timeEnd = console.timeEnd;
-  static trace = console.trace;
-}
-
-console = Logger;
-
 async function importEvents(client, path = '') {
   if (typeof path !== 'string') throw TypeError('The "path" argument must be of type string.');
   const entries = fs.readdirSync(path, { withFileTypes: true });
@@ -103,7 +134,47 @@ async function importEvents(client, path = '') {
   }
 }
 
+async function deploySlashCommands(client, commands) {
+  if (!client._session?.application?.id) {
+    client.logger.warn('Application ID not found, skipping slash command sync.');
+    return;
+  }
+
+  const slashCommands = [];
+  const seen = new Set();
+
+  for (const key in commands) {
+    const cmd = commands[key];
+    if (cmd.data && cmd.data.name && cmd.data.description) {
+      const name = cmd.data.name.toLowerCase();
+      if (!seen.has(name)) {
+        seen.add(name);
+        slashCommands.push({
+          name: name,
+          description: cmd.data.description,
+          options: (cmd.data.options || []).map(opt => ({
+            ...opt,
+            autocomplete: opt.autocomplete || false
+          }))
+        });
+      }
+    }
+  }
+
+  try {
+    client.logger.info(`Syncing ${slashCommands.length} slash commands...`);
+    await client.makeRequest('PUT', `/applications/${client._session.application.id}/commands`, slashCommands);
+    client.logger.info('Slash commands synced successfully.');
+  } catch (error) {
+    client.logger.error('Failed to sync slash commands:', error);
+  }
+}
+
+console = new Logger('CONSOLE');
+
 export default {
   importCommands,
-  importEvents
+  importEvents,
+  deploySlashCommands,
+  Logger
 }

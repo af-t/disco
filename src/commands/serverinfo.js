@@ -34,6 +34,7 @@ export default {
   execute,
   data: {
     name: 'serverinfo',
+    description: 'Show information about the server.',
     aliases: ['si', 'server'],
     usage: 'serverinfo'
   }

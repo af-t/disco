@@ -36,7 +36,16 @@ export default {
   execute,
   data: {
     name: 'unmute',
+    description: 'Unmute a member in the server.',
     usage: 'unmute {users}',
-    permissions: ['MUTE_MEMBERS']
+    permissions: ['MUTE_MEMBERS'],
+    options: [
+      {
+        name: 'user',
+        description: 'The user to unmute',
+        type: 6, // USER type
+        required: true
+      }
+    ]
   }
 };
