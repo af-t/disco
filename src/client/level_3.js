@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 class DiscordClient extends level2 {
   constructor(...args) {
@@ -33,7 +34,7 @@ class DiscordClient extends level2 {
 
     const { attachments } = await this.makeRequest(
       'POST',
-      `/channels/${channel_id}/messages`,
+      `/channels/${channel_id}/attachments`,
       {
         files: upload.map(x => ({ filename: x.filename, file_size: x.file_size }))
       }
@@ -76,7 +77,7 @@ class DiscordClient extends level2 {
 
     if (file.startsWith('http://') || file.startsWith('https://')) {
       if (this._temps.has(file)) {
-        result = this._temps.get(file);
+        Object.assign(result, this._temps.get(file));
       } else {
         const { pathname } = new URL(file);
         const req = await fetch(file);
@@ -103,7 +104,7 @@ class DiscordClient extends level2 {
       const csum = createHash('sha3-256'); // use latest algoritm
       csum.on('error', reject);
       stream.on('data', chunk => csum.update(chunk));
-      stream.on('end', () => resolve(Array.from(csum.digest(), x => x.toString(36))));
+      stream.on('end', () => resolve(Array.from(csum.digest(), x => x.toString(36).join(''))));
     });
 
     return result;

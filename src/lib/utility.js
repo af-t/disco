@@ -59,7 +59,6 @@ async function importCommands(path = '', sub = false) {
 
   for (const entry of entries) {
     const filepath = join(path, entry.name);
-    const filename = basename(path);
 
     if (entry.isDirectory()) {
       const [_commands, _loaded] = await importCommands(filepath, true);
@@ -142,6 +141,7 @@ async function deploySlashCommands(client, commands) {
 
   const slashCommands = [];
   const seen = new Set();
+  const start = Date.now();
 
   for (const key in commands) {
     const cmd = commands[key];
@@ -162,9 +162,9 @@ async function deploySlashCommands(client, commands) {
   }
 
   try {
-    client.logger.info(`Syncing ${slashCommands.length} slash commands...`);
     await client.makeRequest('PUT', `/applications/${client._session.application.id}/commands`, slashCommands);
-    client.logger.info('Slash commands synced successfully.');
+    const synced = slashCommands.length;
+    client.logger.info(`Synced ${synced} slash command${synced > 1 ? 's' : ''} in ${Date.now() - start}ms`);
   } catch (error) {
     client.logger.error('Failed to sync slash commands:', error);
   }

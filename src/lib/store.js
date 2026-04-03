@@ -39,7 +39,7 @@ class StoreManager {
     this.diskTTL   = this._validateInt(config.diskTTL)   ?? 1_200_000;
     this.diskPath  = config.diskPath || join(process.cwd(), 'storage', 'db');
     this.maxMemory = this._validateInt(config.maxMemory) ?? Math.floor(heapLimit * 0.3);
-    this.logger    = config.logger.createLogger('DATABASE');
+    this.logger    = config.logger?.createLogger?.('DATABASE');
   }
 
   async ready() {
