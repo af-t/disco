@@ -28,3 +28,5 @@ client.once("READY", async() => {
 
 ['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await client.destroy(); process.exit(0); }));
 ['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));
+
+export default client;

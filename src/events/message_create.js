@@ -1,6 +1,7 @@
 import permissionFlags from '../lib/permission.js';
 
 const COMMAND_PREFIX = '.';
+const REQUEST_LIMIT = 4;
 
 const parseDM = async (client, message) => {
   const content = message?.content;
@@ -66,6 +67,28 @@ export default async(client, m) => {
   } = await (isGuildMessage ? parseMessage(client, m) : parseDM(client, m));
 
   if (cmd) {
+    const cached = client.store.has(`request_limit:${m.author.id}`) ?
+      await client.store.get(`request_limit:${m.author.id}`) :
+      {
+        notified: false,
+        time: Date.now(),
+        count: 0
+      };
+
+    if (Date.now() - cached.time > 1000) {
+      cached.time = Date.now();
+      cached.count = 0;
+      cached.notified = true;
+    }
+    if (++cached.count > REQUEST_LIMIT) {
+      if (cached.notified) return;
+      const reply = await client.sendMessage(m.channel_id, `**${m.author.global_name || m.author.username}**! Please slow down~ You're a little too fast.`);
+      setTimeout(() => client.deleteMessage(m.channel_id, reply.id), 3000);
+      cached.notified = true;
+      return;
+    }
+    await client.store.set(`request_limit:${m.author.id}`, cached, true);
+
     let allow = true;
 
     if (client.commands[cmd]?.permissions) if (isGuildMessage) {
