@@ -24,8 +24,8 @@ class DiscordClient extends level2 {
     const upload = [];
 
     for (let i = 0; i < files.length; i++) {
-      if (this._store.has(`sum:${files[i].checksum}`)) {
-        cached.push({ ...(await this._store.get(`sum:${files[i].checksum}`)), id: i });
+      if (this.store.has(`sum:${files[i].checksum}`)) {
+        cached.push({ ...(await this.store.get(`sum:${files[i].checksum}`)), id: i });
         continue;
       }
       upload.push({ ...files[i], id: i });
@@ -57,7 +57,7 @@ class DiscordClient extends level2 {
         uploaded_filename: x.upload_filename,
         filename: upload[i].filename
       };
-      this._store.set(`sum:${upload[i].checksum}`, data);
+      this.store.set(`sum:${upload[i].checksum}`, data);
       cached.push(data);
     });
 

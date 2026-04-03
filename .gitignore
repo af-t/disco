@@ -5,5 +5,3 @@ node_modules
 .vscode
 *.lock
 database
-tests
-docs

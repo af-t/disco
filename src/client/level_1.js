@@ -10,7 +10,6 @@ const RECONNECT_LIMIT  = 5;
 
 class DiscordClient extends EventEmitter {
   _initPromise      = null;
-  _store            = null;
   _session          = {};
   _guilds           = new Set();
   _gatewayUrl       = GATEWAY;
@@ -43,11 +42,12 @@ class DiscordClient extends EventEmitter {
       : INTENT_BITS;
     this.shardId = shardId ?? [0, 1];
     this.config  = config;
+    this.store   = null;
   }
 
   async _init() {
-    this._store = new StorageManager(this.config);
-    await this._store.ready();
+    this.store = new StorageManager(this.config);
+    await this.store.ready();
     this._initialised = true;
     this.connect();
   }
@@ -68,6 +68,7 @@ class DiscordClient extends EventEmitter {
   connect() {
     if (this._destroyed)    throw new Error('Cannot reconnect a destroyed gateway — create a new instance');
     if (!this._initialised) throw new Error('Call ready() before connecting');
+    if (this.status !== 'closed') return;
 
     // Tear down any existing socket cleanly before opening a new one.
     if (this._ws) {
@@ -105,9 +106,9 @@ class DiscordClient extends EventEmitter {
       this._ws = null;
     }
 
-    if (this._store) {
-      await this._store.close();
-      this._store = null;
+    if (this.store) {
+      await this.store.close();
+      this.store = null;
     }
 
     this._session = {};
@@ -176,24 +177,24 @@ class DiscordClient extends EventEmitter {
       case 'GUILD_CREATE': this._guilds.add(evData.id);    break;
       case 'GUILD_DELETE': this._guilds.delete(evData.id); break;
       case 'MESSAGE_CREATE':
-        this._store.set(`${evData.channel_id}:${evData.id}`, evData);
+        this.store.set(`${evData.channel_id}:${evData.id}`, evData);
         break;
       case 'MESSAGE_UPDATE':
-        const old = await this._store.get(`${evData.channel_id}:${evData.id}`);
-        this._store.set(`${evData.channel_id}:${evData.id}`, evData); // do not use await on store.set to avoid increased latency
-        this._store.set(`${evData.channel_id}:${evData.id}:old`, old, true);
+        const old = await this.store.get(`${evData.channel_id}:${evData.id}`);
+        this.store.set(`${evData.channel_id}:${evData.id}`, evData); // do not use await on store.set to avoid increased latency
+        this.store.set(`${evData.channel_id}:${evData.id}:old`, old, true);
         break;
       case 'MESSAGE_DELETE':
-        if (this._store.has(`${evData.channel_id}:${evData.id}`)) {
-          const msg = await this._store.get(`${evData.channel_id}:${evData.id}`);
-          this._store.set(`${evData.channel_id}:${evData.id}`, msg, true);
+        if (this.store.has(`${evData.channel_id}:${evData.id}`)) {
+          const msg = await this.store.get(`${evData.channel_id}:${evData.id}`);
+          this.store.set(`${evData.channel_id}:${evData.id}`, msg, true);
         }
         break;
       case 'MESSAGE_DELETE_BULK':
         evData.ids.forEach(async(id) => {
-          if (this._store.has(`${evData.channel_id}:${id}`)) {
-            const msg = await this._store.get(`${evData.channel_id}:${id}`);
-            await this._store.set(`${evData.channel_id}:${id}`, msg, true); // This has no effect on latency, so using await is fine.
+          if (this.store.has(`${evData.channel_id}:${id}`)) {
+            const msg = await this.store.get(`${evData.channel_id}:${id}`);
+            await this.store.set(`${evData.channel_id}:${id}`, msg, true); // This has no effect on latency, so using await is fine.
           }
         });
         break;

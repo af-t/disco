@@ -1,7 +1,7 @@
 export default async (client, m) => {
   if (!m.guild_id || m.author?.bot) return;
 
-  const cached = await client._store.get(`${m.channel_id}:${m.id}:old`);
+  const cached = await client.store.get(`${m.channel_id}:${m.id}:old`);
   if (cached && cached.content === m.content) return;
 
   const channels = await client.getChannels(m.guild_id);

@@ -50,10 +50,10 @@ class DiscordClient extends level1 {
   }
 
   async _cacheableGet(endpoint) {
-    let cached = await this._store.get(endpoint);
+    let cached = await this.store.get(endpoint);
     if (!cached) {
       cached = await this.makeRequest('GET', endpoint);
-      await this._store.set(endpoint, cached, true);
+      await this.store.set(endpoint, cached, true);
     }
 
     return cached;
@@ -67,11 +67,11 @@ class DiscordClient extends level1 {
     if (useFetch) {
       const msg = await this._cacheableGet(`/channels/${channel_id}/messages/${message_id}`);
       // update stored message data
-      await this._store.set(`${channel_id}:${message_id}`, msg);
+      await this.store.set(`${channel_id}:${message_id}`, msg);
 
       return msg;
     }
-    return this._store.get(`${channel_id}:${message_id}`);
+    return this.store.get(`${channel_id}:${message_id}`);
   }
 
   async getMessages(channel_id, options = {}) {
