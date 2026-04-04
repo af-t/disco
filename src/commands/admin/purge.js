@@ -10,10 +10,10 @@ const execute = async(client, msg, args) => {
 
     do {
       messages = await client.getMessages(msg.channel_id, { after, limit: 100 });
+      messagesToDelete.push(...filter(messages));
       after = messages.at(-1)?.id;
     } while (messages.length === 100 && after);
 
-    messagesToDelete.push(...filter(messages));
     messagesToDelete.push({ id: msg.message_reference.message_id });
 
   } else {
@@ -23,7 +23,7 @@ const execute = async(client, msg, args) => {
     let remain = count;
     let before = msg.id;
     while (remain > 0) {
-      const messages = await client.getMessages(msg.channel_id, { before, limit: Math.min(count, 100) });
+      const messages = await client.getMessages(msg.channel_id, { before, limit: Math.min(remain, 100) });
       const filteredMsgs = filter(messages);
 
       remain -= filteredMsgs.length;

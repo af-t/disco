@@ -20,17 +20,14 @@ const execute = async (client, message, args) => {
   }
 
   // General help
-  const commandList = Object.keys(commands)
-    .filter((name, index, self) => self.indexOf(name) === index) // Filter duplicates from aliases
-    .filter(name => commands[name].name === name) // Only show main names
-    .map(name => `\`${name}\``)
-    .join(', ');
+  const commandNames = Object.keys(commands).filter(name => commands[name].data.name === name);
+  const commandList = commandNames.map(name => `\`${name}\``).join(', ');
 
   const embed = {
     title: 'Disco Bot Commands',
     description: `Here is a list of available commands:\n\n${commandList}\n\nUse \`${prefix}help {command}\` for more info on a specific command.`,
     color: 0x00AE86,
-    footer: { text: `Total Commands: ${Object.keys(commands).length}` }
+    footer: { text: `Total Commands: ${commandNames.length}` }
   };
 
   return client.reply(message, null, false, { embeds: [embed] });

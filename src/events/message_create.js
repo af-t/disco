@@ -52,6 +52,17 @@ const parseMessage = (client, message) => {
   return {};
 };
 
+const getPermissions = async (client, guild_id, member) => {
+  let perms = 0n;
+  let guildRoles;
+  for (const id of member.roles) {
+    if (!guildRoles) guildRoles = await client.getRoles(guild_id);
+    const role = guildRoles.find(r => r.id === id);
+    if (role) perms |= BigInt(role.permissions);
+  }
+  return perms;
+};
+
 export default async(client, m) => {
   const isGuildMessage = !!m.guild_id;
   const isSelf = m.author.id === client._session.user.id;
@@ -59,6 +70,33 @@ export default async(client, m) => {
 
   // ignore in several conditions
   if (isBot || isSelf) return;
+
+  // Auto-moderation logic
+  if (isGuildMessage) {
+    // 1. Anti-link (ignore for admins/moderators)
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    if (urlRegex.test(m.content)) {
+      const member = m.member || await client.getGuildMember(m.guild_id, m.author.id);
+      const perms = await getPermissions(client, m.guild_id, member);
+      const isMod = (perms & 8n) === 8n || (perms & 0x0000000000000008n) === 0x0000000000000008n || (perms & 0x0000000000002000n) === 0x0000000000002000n; // Admin or Manage Messages
+
+      if (!isMod) {
+        await client.deleteMessage(m.channel_id, m.id);
+        const warn = await client.sendMessage(m.channel_id, `🚫 **${m.author.username}**, posting links is not allowed here!`);
+        setTimeout(() => client.deleteMessage(m.channel_id, warn.id).catch(() => {}), 5000);
+        return;
+      }
+    }
+
+    // 2. Anti-spam (repetitive content)
+    const lastMsgKey = `last_msg:${m.author.id}:${m.channel_id}`;
+    const lastMsg = await client.store.get(lastMsgKey);
+    if (lastMsg === m.content && m.content.length > 5) {
+      await client.deleteMessage(m.channel_id, m.id);
+      return; // Silently delete repetitive spam
+    }
+    await client.store.set(lastMsgKey, m.content, true); // TTL will handle cleanup
+  }
 
   const {
     useAI, cmd,
@@ -93,13 +131,7 @@ export default async(client, m) => {
 
     if (client.commands[cmd]?.permissions) if (isGuildMessage) {
       const member = m.member || await client.getGuildMember(m.guild_id, m.author.id);
-      let perms = 0n; //BigInt(0)
-      let guildRoles;
-      for (const id of member.roles) {
-        if (!guildRoles) guildRoles = await client.getRoles(m.guild_id);
-        const role = guildRoles.find(r => r.id === id);
-        if (role) perms |= BigInt(role.permissions);
-      }
+      const perms = await getPermissions(client, m.guild_id, member);
 
       const hasAdmin = (perms & 8n) === 8n;
 

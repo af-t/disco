@@ -12,8 +12,10 @@ class DiscordClient extends level2 {
   }
 
   async sendMessage(channel_id, content, options = {}) {
-    if (options.attachments) {
-      options.attachments = await this.uploadToDiscord(channel_id, options.attachments);
+    const files = options.attachments || options.files;
+    if (files) {
+      options.attachments = await this.uploadToDiscord(channel_id, files);
+      delete options.files;
     }
     return this.makeRequest('POST', `/channels/${channel_id}/messages`, { content, ...options });
   }
@@ -104,7 +106,7 @@ class DiscordClient extends level2 {
       const csum = createHash('sha3-256'); // use latest algoritm
       csum.on('error', reject);
       stream.on('data', chunk => csum.update(chunk));
-      stream.on('end', () => resolve(Array.from(csum.digest(), x => x.toString(36).join(''))));
+      stream.on('end', () => resolve(Array.from(csum.digest(), x => x.toString(36)).join('')));
     });
 
     return result;
@@ -112,6 +114,11 @@ class DiscordClient extends level2 {
 
   async reply(message, content, mention = false, options = {}) {
     if (message.isInteraction && typeof message.reply === 'function') {
+      const files = options.attachments || options.files;
+      if (files) {
+        options.attachments = await this.uploadToDiscord(message.channel_id, files);
+        delete options.files;
+      }
       await message.reply(content, options);
       return {
         isInteractionResponse: true,

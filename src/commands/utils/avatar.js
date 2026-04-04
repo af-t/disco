@@ -12,7 +12,7 @@ const execute = async (c, m, a) => {
   for (let i = 0; i < a.length; i++) {
     let uid = a[i].match(/<@!?(\d+)>/)?.[1];
     if (!uid && !isNaN(Number(a[i]))) uid = a[i];
-    if (uid.length > 15) uids.add(uid);
+    if (uid && uid.length > 15) uids.add(uid);
   }
 
   if (uids.size < 1 && m.message_reference) try {
