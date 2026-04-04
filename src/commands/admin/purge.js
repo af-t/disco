@@ -49,7 +49,8 @@ const execute = async(client, msg, args) => {
   }
 
   if (deleted > 0) {
-    const reply = await client.reply(msg, `🧹 Deleted **${deleted - 1}** messages.`);
+    const content = `🧹 Deleted **${deleted - 1}** messages.`;
+    const reply = msg.isInteraction ? await client.reply(msg, content) : await client.sendMessage(msg.channel_id, content);
     if (reply?.channel_id && reply?.id) setTimeout(() => client.deleteMessage(msg.channel_id, reply.id).catch(_ => _), 3_500);
   }
 };
