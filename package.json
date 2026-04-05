@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node ."
+    "start": "node src/index.js",
+    "start:all": "node src/store/server.js & node src/index.js"
   },
   "repository": {
     "type": "git",
@@ -27,7 +28,7 @@
   },
   "homepage": "https://github.com/af-t/disco#readme",
   "dependencies": {
-    "dotenv": "^17.3.1",
+    "dotenv": "^17.4.0",
     "ws": "^8.20.0"
   }
 }

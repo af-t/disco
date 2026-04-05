@@ -21,7 +21,7 @@ await tools.importEvents(client, EVENTS_PATH);
 
 await client.ready();
 
-client.once("READY", async() => {
+client.once('READY', async() => {
   client.commands = await tools.importCommands(COMMANDS_PATH);
   tools.deploySlashCommands(client, client.commands);
 });

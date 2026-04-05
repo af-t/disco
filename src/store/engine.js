@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
 
-const ACTION = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3 });
+const ACTION = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3, HAS: 4, METADATA: 5 });
 const LOCATION = Object.freeze({ MEMORY: 0, DISK: 1 });
 
 class StoreManager {
@@ -119,16 +119,18 @@ class StoreManager {
   }
 
   /** Returns true if the key exists (even if the value is on disk). */
-  has(key) {
-    return this._metadata.has(key);
+  async has(key) {
+    if (typeof key !== 'string') throw new TypeError('key must be a string');
+    return this._addAction(ACTION.HAS, key);
   }
 
   /** Shallow copy of the metadata entry for `key`, or {} if not found. */
-  metadata(key) {
-    return Object.assign({}, this._metadata.get(key) ?? {});
+  async metadata(key) {
+    if (typeof key !== 'string') throw new TypeError('key must be a string');
+    return this._addAction(ACTION.METADATA, key);
   }
 
-  getStats() {
+  async getStats() {
     // Count memory / disk items without allocating intermediate arrays
     let itemsInMemory = 0;
     let itemsOnDisk   = 0;
@@ -196,7 +198,7 @@ class StoreManager {
     };
   }
 
-  resetStats() {
+  async resetStats() {
     this._stats          = this._makeStats();
     this._queueLenSum    = 0;
     this._queueLenSamples = 0;
@@ -351,6 +353,17 @@ class StoreManager {
           task = async () => {
             await this._delete(key);
             resolve();
+          };
+          break;
+        case ACTION.HAS:
+          task = async () => {
+            resolve(this._metadata.has(key));
+          };
+          break;
+        case ACTION.METADATA:
+          task = async () => {
+            const res = Object.assign({}, this._metadata.get(key) || {});
+            resolve(res);
           };
           break;
       }

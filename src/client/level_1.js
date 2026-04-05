@@ -1,4 +1,4 @@
-import StorageManager from '../lib/store.js';
+import StorageManager from '../store/client.js';
 import zlib from 'node:zlib';
 import { WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
