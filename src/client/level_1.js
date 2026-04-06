@@ -185,14 +185,14 @@ class DiscordClient extends EventEmitter {
         this.store.set(`${evData.channel_id}:${evData.id}:old`, old, true);
         break;
       case 'MESSAGE_DELETE':
-        if (this.store.has(`${evData.channel_id}:${evData.id}`)) {
+        if ((await this.store.has(`${evData.channel_id}:${evData.id}`))) {
           const msg = await this.store.get(`${evData.channel_id}:${evData.id}`);
           this.store.set(`${evData.channel_id}:${evData.id}`, msg, true);
         }
         break;
       case 'MESSAGE_DELETE_BULK':
         evData.ids.forEach(async(id) => {
-          if (this.store.has(`${evData.channel_id}:${id}`)) {
+          if ((await this.store.has(`${evData.channel_id}:${id}`))) {
             const msg = await this.store.get(`${evData.channel_id}:${id}`);
             await this.store.set(`${evData.channel_id}:${id}`, msg, true); // This has no effect on latency, so using await is fine.
           }

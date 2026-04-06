@@ -27,7 +27,7 @@ class DiscordClient extends level2 {
     const upload = [];
 
     for (let i = 0; i < files.length; i++) {
-      if (this.store.has(`sum:${files[i].checksum}`)) {
+      if ((await this.store.has(`sum:${files[i].checksum}`))) {
         cached.push({ ...(await this.store.get(`sum:${files[i].checksum}`)), id: i });
         continue;
       }

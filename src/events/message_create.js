@@ -105,7 +105,7 @@ export default async(client, m) => {
   } = await (isGuildMessage ? parseMessage(client, m) : parseDM(client, m));
 
   if (cmd) {
-    const cached = client.store.has(`request_limit:${m.author.id}`) ?
+    const cached = (await client.store.has(`request_limit:${m.author.id}`)) ?
       await client.store.get(`request_limit:${m.author.id}`) :
       {
         notified: false,

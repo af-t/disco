@@ -70,4 +70,5 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => connected--);
 });
 
-server.listen(3000);
+server.listen(process.env.STORE_SERVER_PORT || 3000);
+['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await store.close(); }));

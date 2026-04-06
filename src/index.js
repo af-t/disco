@@ -13,7 +13,7 @@ const DATABASE_PATH = join(__dirname, '..', 'database');
 const COMMANDS_PATH = join(__dirname, '..', 'src', 'commands');
 const EVENTS_PATH = join(__dirname, '..', 'src', 'events');
 
-const client = new Discord(process.env.DISCORD_TOKEN, null, null, { diskPath: DATABASE_PATH, logger: tools.Logger });
+const client = new Discord(process.env.DISCORD_TOKEN, null, null, { diskPath: DATABASE_PATH, logger: tools.Logger, url: process.env.STORE_SERVER_URL });
 
 client.logger = new tools.Logger('GATEWAY');
 client.tempDM = new Map();
@@ -26,7 +26,7 @@ client.once('READY', async() => {
   tools.deploySlashCommands(client, client.commands);
 });
 
-['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await client.destroy(); process.exit(0); }));
+['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await client.destroy(); }));
 ['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));
 
 export default client;
