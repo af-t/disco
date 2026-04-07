@@ -3,10 +3,40 @@ import zlib from 'node:zlib';
 import { WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
 
-const GATEWAY          = 'wss://gateway.discord.gg';
-const INTENT_BITS      = 53608447;
-const RECONNECT_DELAY  = 5000;
-const RECONNECT_LIMIT  = 5;
+import intentBits from '../lib/intents.js';
+
+const DEFAULT_INTENT_KEYS = [
+  'GUILDS',
+  'GUILD_MEMBERS',
+  'GUILD_MODERATION',
+  'GUILD_EMOJIS_AND_STICKERS',
+  'GUILD_INTEGRATIONS',
+  'GUILD_WEBHOOKS',
+  'GUILD_INVITES',
+  'GUILD_VOICE_STATES',
+  'GUILD_PRESENCES',
+  'GUILD_MESSAGES',
+  'GUILD_MESSAGE_REACTIONS',
+  'GUILD_MESSAGE_TYPING',
+  'DIRECT_MESSAGES',
+  'DIRECT_MESSAGE_REACTIONS',
+  'DIRECT_MESSAGE_TYPING',
+  'MESSAGE_CONTENT',
+  'GUILD_SCHEDULED_EVENTS',
+  'AUTO_MODERATION_CONFIGURATION',
+  'AUTO_MODERATION_EXECUTION',
+  'GUILD_MESSAGE_POLLS',
+  'DIRECT_MESSAGE_POLLS',
+];
+
+const gatewayOverride = process.env.DISCORD_GATEWAY_URL;
+const GATEWAY          = gatewayOverride && gatewayOverride.trim() ? gatewayOverride : 'wss://gateway.discord.gg';
+const intentEnv        = process.env.DISCORD_INTENTS;
+const INTENT_BITS      = intentEnv && intentEnv.trim()
+  ? intentEnv.split(',').reduce((acc, k) => acc | (intentBits[k.trim()] || 0), 0)
+  : DEFAULT_INTENT_KEYS.reduce((acc, k) => acc | intentBits[k], 0);
+const RECONNECT_DELAY  = parseInt(process.env.DISCORD_RECONNECT_DELAY, 10) || 5000;
+const RECONNECT_LIMIT  = parseInt(process.env.DISCORD_RECONNECT_LIMIT, 10) || 5;
 
 class DiscordClient extends EventEmitter {
   _initPromise      = null;
@@ -191,12 +221,12 @@ class DiscordClient extends EventEmitter {
         }
         break;
       case 'MESSAGE_DELETE_BULK':
-        evData.ids.forEach(async(id) => {
+        for (const id of evData.ids) {
           if ((await this.store.has(`${evData.channel_id}:${id}`))) {
             const msg = await this.store.get(`${evData.channel_id}:${id}`);
-            await this.store.set(`${evData.channel_id}:${id}`, msg, true); // This has no effect on latency, so using await is fine.
+            await this.store.set(`${evData.channel_id}:${id}`, msg, true);
           }
-        });
+        }
         break;
     }
 

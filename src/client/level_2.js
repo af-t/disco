@@ -1,14 +1,10 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import level1 from './level_1.js';
 
-const BASE_URL = 'https://discord.com/api/v10';
-const MAX_RETRIES = 3;
+const BASE_URL     = process.env.DISCORD_API_BASE || 'https://discord.com/api/v10';
+const MAX_RETRIES  = parseInt(process.env.DISCORD_MAX_RETRIES, 10) || 3;
 
 class DiscordClient extends level1 {
-  constructor(...args) {
-    super(...args);
-  }
-
   async makeRequest(method, endpoint, body, headers = {}) {
     if (!this._initialised) throw new Error('call ready() first');
 

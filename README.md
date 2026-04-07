@@ -34,11 +34,28 @@ A modular and extendable Discord bot built with Node.js, designed for server man
 
 3. **Configure the bot**:
 
-   Create a `.env` file in the root directory and add your Discord bot token:
+   Copy `.env.example` to `.env` and fill in your values:
 
-   ```env
-   DISCORD_TOKEN=your-bot-token-here
+   ```bash
+   cp .env.example .env
    ```
+
+   **Environment variables**
+
+   | Variable              | Required | Default                          | Description |
+   |-----------------------|----------|----------------------------------|-------------|
+   | `DISCORD_TOKEN`       | Yes      | —                                | Your Discord bot token |
+   | `STORE_SERVER_URL`    | Yes      | `http://localhost:3000`          | URL of the internal store server |
+   | `STORE_SERVER_PORT`   | No       | `3000`                           | Port for the store server |
+   | `GEMINI_API_KEY`      | No       | —                                | Google Gemini API key (for `/gemini` command) |
+   | `SPOTIFY_CLIENT_ID`   | No       | —                                | Spotify API client ID (for music downloads) |
+   | `SPOTIFY_CLIENT_SECRET` | No     | —                                | Spotify API client secret |
+   | `DISCORD_GATEWAY_URL` | No       | `wss://gateway.discord.gg`       | Discord WebSocket gateway URL (advanced) |
+   | `DISCORD_API_BASE`    | No       | `https://discord.com/api/v10`    | Discord REST API base URL (advanced) |
+   | `DISCORD_INTENTS`     | No       | 13 essential intents combined    | Comma-separated intent names (e.g., `GUILDS,GUILD_MEMBERS,GUILD_MESSAGES`). See [lib/intents.js](src/lib/intents.js) for all options |
+   | `DISCORD_RECONNECT_DELAY` | No    | `5000`                           | Milliseconds between reconnect attempts |
+   | `DISCORD_RECONNECT_LIMIT` | No    | `5`                              | Max reconnect attempts before giving up |
+   | `DISCORD_MAX_RETRIES` | No       | `3`                              | Max API request retries |
 
 4. **Start the bot**:
 

@@ -78,7 +78,7 @@ export default async(client, m) => {
     if (urlRegex.test(m.content)) {
       const member = m.member || await client.getGuildMember(m.guild_id, m.author.id);
       const perms = await getPermissions(client, m.guild_id, member);
-      const isMod = (perms & 8n) === 8n || (perms & 0x0000000000000008n) === 0x0000000000000008n || (perms & 0x0000000000002000n) === 0x0000000000002000n; // Admin or Manage Messages
+      const isMod = (perms & 8n) === 8n || (perms & 0x0000000000002000n) === 0x0000000000002000n; // Admin or Manage Messages
 
       if (!isMod) {
         await client.deleteMessage(m.channel_id, m.id);

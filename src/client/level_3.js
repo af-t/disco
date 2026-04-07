@@ -7,10 +7,6 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 class DiscordClient extends level2 {
-  constructor(...args) {
-    super(...args);
-  }
-
   async sendMessage(channel_id, content, options = {}) {
     const files = options.attachments || options.files;
     if (files) {
