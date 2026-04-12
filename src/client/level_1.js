@@ -156,6 +156,7 @@ class DiscordClient extends EventEmitter {
   get guilds()      { return new Set(this._guilds); }
 
   _onOpen() {
+    this._ws._socket.setNoDelay(true);
     this._session.id ? this._resume() : this._identify();
     this.emit('OPEN');
   }
