@@ -17,8 +17,8 @@ class StoreClient {
   _queueLenSamples = 0;
 
   _stats = this._makeStats();
-  
-  ws = null;
+
+  _ws = null;
   _msgId = 0;
   _pendingRequests = new Map();
   _reconnect = true;
@@ -27,14 +27,14 @@ class StoreClient {
   constructor(config = {}) {
     this.url = config?.url || 'ws://localhost:3000';
     this.config = config;
-    
+
     // Use ?? instead of || so that an explicit 0 is not silently replaced by default.
     this.memoryTTL = this._validateInt(config.memoryTTL) ?? 300_000;
     this.serverTTL = this._validateInt(config.serverTTL) ?? 1_200_000;
-    
+
     const heapLimit = v8.getHeapStatistics().heap_size_limit;
     this.maxMemory = this._validateInt(config.maxMemory) ?? Math.floor(heapLimit * 0.3);
-    this.logger    = config.logger?.createLogger?.('DATABASE_CLIENT');
+    this.logger    = config.logger?.createLogger?.('DB_CLIENT');
   }
 
   async ready() {
@@ -68,13 +68,13 @@ class StoreClient {
     }
 
     await this._demoteAll();
-    
-    if (this.ws) {
+
+    if (this._ws) {
       try { await this._send('close'); } catch { /* ignore */ }
-      this.ws.close();
-      this.ws = null;
+      this._ws.close();
+      this._ws = null;
     }
-    
+
     return true;
   }
 
@@ -147,7 +147,7 @@ class StoreClient {
     return {
       uptime:    this._formatDuration(uptime),
       uptimeMs:  uptime,
-      connected: this.ws?.readyState === WebSocket.OPEN,
+      connected: this._ws?.readyState === WebSocket.OPEN,
       operations: {
         ...this._stats.operations,
         total: Object.values(this._stats.operations).reduce((a, b) => a + b, 0),
@@ -268,7 +268,7 @@ class StoreClient {
         case ACTION.GET:
           task = async () => {
             const meta = this._metadata.get(key);
-            
+
             // 1. Check memory first
             if (meta?.location === LOCATION.MEMORY) {
               meta.accessCount++;
@@ -302,7 +302,7 @@ class StoreClient {
                     dataSizeV8:   0,
                     expired:      Date.now() + this.memoryTTL,
                   };
-                  
+
                   newMeta.location = LOCATION.MEMORY;
                   newMeta.lastAccess = Date.now();
                   newMeta.expired = Date.now() + this.memoryTTL;
@@ -510,11 +510,12 @@ class StoreClient {
 
     return new Promise((resolve) => {
       this._log('info', `connecting to storage server at ${this.url}`);
-      this.ws = new WebSocket(this.url);
+      this._ws = new WebSocket(this.url);
 
-      this.ws.on('open', async () => {
+      this._ws.on('open', async () => {
         this._connecting = false;
         try {
+          this._ws._socket.setNoDelay(true);
           await this._send('new', [this.config]);
           await this._send('ready');
           this._log('info', 'connected to storage server');
@@ -524,12 +525,12 @@ class StoreClient {
         resolve();
       });
 
-      this.ws.on('error', (err) => {
+      this._ws.on('error', (err) => {
         this._connecting = false;
-        if (this.ws) {
-          this.ws.removeAllListeners();
-          this.ws.terminate();
-          this.ws = null;
+        if (this._ws) {
+          this._ws.removeAllListeners();
+          this._ws.terminate();
+          this._ws = null;
         }
         this._log('warn', `server connection error: ${err.message}, retrying in 5s...`);
         if (this._reconnect) {
@@ -539,7 +540,7 @@ class StoreClient {
         }
       });
 
-      this.ws.on('message', (buffer) => {
+      this._ws.on('message', (buffer) => {
         try {
           const response = deserialize(buffer);
           const { id, data } = response;
@@ -554,11 +555,11 @@ class StoreClient {
         }
       });
 
-      this.ws.on('close', () => {
+      this._ws.on('close', () => {
         this._connecting = false;
-        if (this.ws) {
-          this.ws.removeAllListeners();
-          this.ws = null;
+        if (this._ws) {
+          this._ws.removeAllListeners();
+          this._ws = null;
         }
         if (this._reconnect) {
           this._log('info', 'server connection closed, reconnecting in 5s...');
@@ -571,7 +572,7 @@ class StoreClient {
   }
 
   _send(op, args = []) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('WebSocket not connected'));
     }
 
@@ -580,13 +581,13 @@ class StoreClient {
       this._pendingRequests.set(id, { resolve, reject });
 
       const payload = JSON.stringify({ op, id, args });
-      this.ws.send(payload, (err) => {
+      this._ws.send(payload, (err) => {
         if (err) {
           this._pendingRequests.delete(id);
           reject(err);
         }
       });
-      
+
       // Safety timeout
       setTimeout(() => {
         if (this._pendingRequests.has(id)) {

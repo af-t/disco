@@ -5,17 +5,28 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'node:http';
 
 const server = createServer((req, res) => {
-  res.writeHead(200);
-  res.end('server ok\n');
+  res.writeHead(204);
+  res.end();
 });
 const wss = new WebSocketServer({ server });
+const requestLog = new Map();
 
 let store = null;
-let connected = 0;
 
 wss.on('connection', (ws, req) => {
-  setTimeout(() => ws.close(), 180_000);
-  connected++;
+  const clientIp = req.socket.remoteAddress;
+  if (requestLog.has(clientIp)) {
+    const socket = requestLog.get(clientIp);
+    socket.destroy();
+    requestLog.delete(clientIp);
+  }
+  requestLog.set(clientIp, req.socket);
+
+  req.socket.setNoDelay(true);
+  ws._socket.setNoDelay(true);
+
+  // Apply timeout
+  setTimeout(() => req.socket.destroy(), 180_000).unref();
 
   ws.on('message', async(m) => {
     try {
@@ -38,7 +49,7 @@ wss.on('connection', (ws, req) => {
 
     if (op === 'close') {
       ws.send(serialize({ id }));
-      if (connected === 1) {
+      if (requestLog.size === 1) {
         await store.close();
         store = null;
       }
@@ -67,8 +78,16 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  ws.on('close', () => connected--);
+  ws.on('close', () => requestLog.delete(clientIp));
 });
 
 server.listen(process.env.STORE_SERVER_PORT || 3000);
-['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await store?.close?.(); }));
+['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => {
+  await store?.close?.();
+  for (const [ip, socket] of requestLog.entries()) {
+    socket.destroy();
+    requestLog.delete(ip);
+  }
+
+  server.close();
+}));
