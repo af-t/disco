@@ -16,7 +16,7 @@ test('downloadTrack should throw error if SPOTIFY_CLIENT_ID is missing', async (
 
   const originalId = process.env.SPOTIFY_CLIENT_ID;
   delete process.env.SPOTIFY_CLIENT_ID;
-  
+
   try {
     await assert.rejects(async () => {
       await downloadTrack('https://open.spotify.com/track/123');

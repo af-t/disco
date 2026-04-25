@@ -370,7 +370,7 @@ class StoreClient {
           break;
         case ACTION.ATTR_SET:
           task = async () => {
-            try { 
+            try {
               await this._send('set-attr', [key, data]);
               resolve(true);
             } catch {
@@ -508,7 +508,7 @@ class StoreClient {
       meta.location = LOCATION.SERVER;
       meta.expired  = meta.isCache ? (Date.now() + this.serverTTL) : Infinity;
       if (meta.customTTL) meta.expired = Date.now() + meta.customTTL;
-      
+
       this._data.delete(key);
       this._metadata.set(key, meta);
       this._stats.cache.demotions++;

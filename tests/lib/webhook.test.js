@@ -14,11 +14,11 @@ test('DiscordWebhookTools should validate webhook URL', () => {
 test('DiscordWebhookTools.sendMessage should call https.request', async (t) => {
   const validUrl = 'https://discord.com/api/webhooks/123/abc';
   const tools = new DiscordWebhookTools(validUrl);
-  
+
   const requestMock = t.mock.method(https, 'request', (options, callback) => {
     assert.strictEqual(options.hostname, 'discord.com');
     assert.strictEqual(options.method, 'POST');
-    
+
     const mockRes = {
       statusCode: 204,
       headers: { 'x-ratelimit-remaining': '29' },
@@ -40,11 +40,11 @@ test('DiscordWebhookTools.sendMessage should call https.request', async (t) => {
 
 test('DiscordWebhookTools.deleteMessage should call https.request with DELETE', async (t) => {
   const tools = new DiscordWebhookTools('https://discord.com/api/webhooks/123/abc');
-  
+
   const requestMock = t.mock.method(https, 'request', (options, callback) => {
     assert.strictEqual(options.method, 'DELETE');
     assert.ok(options.path.includes('/messages/456'));
-    
+
     const mockRes = {
       statusCode: 204,
       headers: {},
@@ -60,11 +60,11 @@ test('DiscordWebhookTools.deleteMessage should call https.request with DELETE', 
 
 test('DiscordWebhookTools.editMessage should call https.request with PATCH', async (t) => {
   const tools = new DiscordWebhookTools('https://discord.com/api/webhooks/123/abc');
-  
+
   const requestMock = t.mock.method(https, 'request', (options, callback) => {
     assert.strictEqual(options.method, 'PATCH');
     assert.ok(options.path.includes('/messages/456'));
-    
+
     const mockRes = {
       statusCode: 200,
       headers: {},

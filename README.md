@@ -47,7 +47,8 @@ A modular and extendable Discord bot built with Node.js, designed for server man
    | `DISCORD_TOKEN`       | Yes      | —                                | Your Discord bot token |
    | `STORE_SERVER_URL`    | Yes      | `http://localhost:3000`          | URL of the internal store server |
    | `STORE_SERVER_PORT`   | No       | `3000`                           | Port for the store server |
-   | `GEMINI_API_KEY`      | No       | —                                | Google Gemini API key (for `/gemini` command) |
+   | `OPENROUTER_API_KEY`  | No       | —                                | OpenRouter API key (for AI commands) |
+   | `OPENROUTER_MODEL`    | No       | `google/gemini-2.0-flash-001`    | AI model to use for the agent |
    | `SPOTIFY_CLIENT_ID`   | No       | —                                | Spotify API client ID (for music downloads) |
    | `SPOTIFY_CLIENT_SECRET` | No     | —                                | Spotify API client secret |
    | `DISCORD_GATEWAY_URL` | No       | `wss://gateway.discord.gg`       | Discord WebSocket gateway URL (advanced) |

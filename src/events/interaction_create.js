@@ -3,7 +3,7 @@ export default async (client, interaction) => {
   if (interaction.type === 4) {
     const { name, options } = interaction.data;
     const focused = options.find(opt => opt.focused);
-    
+
     if (name === 'help' && focused && focused.name === 'command') {
       const query = focused.value.toLowerCase();
       const choices = Object.keys(client.commands)
@@ -49,8 +49,8 @@ export default async (client, interaction) => {
     const payload = typeof content === 'string' ? { content } : content;
     return client.createInteractionResponse(interaction.id, interaction.token, {
       type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
-      data: { 
-        ...payload, 
+      data: {
+        ...payload,
         ...options,
         flags: 64 // EPHEMERAL: Only visible to the user
       }

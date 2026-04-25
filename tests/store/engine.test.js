@@ -72,13 +72,13 @@ test('StoreManager (Engine) should respect custom TTL', async () => {
   try {
     // Set with short TTL (100ms)
     await engine.set('ttl-test', 'data', { ttl: 100 });
-    
+
     // Immediate check
     assert.strictEqual(await engine.get('ttl-test'), 'data');
 
     // Wait for expiration
     await new Promise(r => setTimeout(r, 200));
-    
+
     const val = await engine.get('ttl-test');
     assert.strictEqual(val, undefined, 'Value should be expired');
   } finally {
@@ -102,7 +102,7 @@ test('StoreManager (Engine) should trigger onDelete hook', async () => {
   try {
     await engine.set('del-test', 'some-data');
     await engine.delete('del-test');
-    
+
     assert.strictEqual(deletedKey, 'del-test');
     assert.ok(deletedMeta);
     assert.strictEqual(deletedMeta.created > 0, true);

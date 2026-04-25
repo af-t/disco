@@ -25,7 +25,7 @@ test('StoreClient should connect and send/receive data', async (t) => {
   mockWs.removeAllListeners = t.mock.fn();
 
   const client = new StoreClient({ url: 'ws://mock' });
-  
+
   // Directly set the ws and simulate listeners that client.js would add
   client._ws = mockWs;
   client._reconnect = false; // Disable reconnect for test

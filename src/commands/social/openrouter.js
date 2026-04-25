@@ -31,8 +31,8 @@ const execute = async (c, m, _, a) => {
 
   if (!session) {
     const id = crypto.randomBytes(3).toString('hex');
-    session = { 
-      id, 
+    session = {
+      id,
       path: path.join(process.cwd(), 'workspaces', id),
       guildId: m.guild_id,
       userId: m.author.id
@@ -78,7 +78,7 @@ const execute = async (c, m, _, a) => {
         .filter(b => b.type === 'thinking')
         .map(b => b.text)
         .join('\n');
-      
+
       if (thinking && thinking !== lastThinking) {
         lastThinking = thinking;
         const now = Date.now();
@@ -97,12 +97,12 @@ const execute = async (c, m, _, a) => {
       process.chdir(session.path);
 
       const agent = await createAgent();
-      const prompt = attachments.length > 0 
+      const prompt = attachments.length > 0
         ? [{ type: 'text', text: a }, ...attachments]
         : a;
 
       const responseContent = await agent.run(prompt, updateThinking);
-      
+
       let response = '';
       if (Array.isArray(responseContent)) {
         response = responseContent
@@ -117,7 +117,7 @@ const execute = async (c, m, _, a) => {
         const tempFileName = 'message.txt';
         const tempFilePath = path.join(session.path, tempFileName);
         await fs.writeFile(tempFilePath, response);
-        
+
         // Reply with file and delete the thinking message
         await c.reply(m, '', false, {files: [tempFilePath]});
         await c.deleteMessage(thinkingMsg.channel_id, thinkingMsg.id).catch(() => {});

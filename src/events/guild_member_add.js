@@ -9,7 +9,7 @@ export default async (client, member) => {
     title: `Welcome to the server!`,
     description: `Hello <@${user.id}>, welcome to **${(await client.getGuild(guildId)).name}**! We're glad to have you here.`,
     thumbnail: {
-      url: user.avatar 
+      url: user.avatar
         ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=1024`
         : `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator) % 5}.png`
     },

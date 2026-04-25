@@ -9,7 +9,7 @@ export default async (client, member) => {
     title: `Goodbye!`,
     description: `**${user.username}#${user.discriminator || '0'}** has left the server. We'll miss you!`,
     thumbnail: {
-      url: user.avatar 
+      url: user.avatar
         ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=1024`
         : `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator) % 5}.png`
     },

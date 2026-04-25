@@ -8,7 +8,7 @@ const { Logger, importCommands } = utility;
 
 test('Logger class should format and log messages correctly', (t) => {
   const logger = new Logger('TEST');
-  
+
   const stdoutMock = t.mock.method(process.stdout, 'write', () => {});
   const stderrMock = t.mock.method(process.stderr, 'write', () => {});
 
@@ -24,7 +24,7 @@ test('Logger class should format and log messages correctly', (t) => {
 test('importCommands should load commands from a directory', async (t) => {
   const tempDir = join(process.cwd(), 'tests_tmp_commands');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-  
+
   const commandFile = join(tempDir, 'ping.js');
   fs.writeFileSync(commandFile, `
     export default {
