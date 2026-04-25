@@ -1,29 +1,29 @@
 const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
 
-const execute = async(client, msg, args) => {
+const execute = async(client, message, args) => {
   const messagesToDelete = [];
   let deleted = 0;
 
-  if (msg.message_reference) {
+  if (message.message_reference) {
     let messages = [];
-    let after = msg.message_reference.message_id;
+    let after = message.message_reference.message_id;
 
     do {
-      messages = await client.getMessages(msg.channel_id, { after, limit: 100 });
+      messages = await client.getMessages(message.channel_id, { after, limit: 100 });
       messagesToDelete.push(...filter(messages));
       after = messages.at(-1)?.id;
     } while (messages.length === 100 && after);
 
-    messagesToDelete.push({ id: msg.message_reference.message_id });
+    messagesToDelete.push({ id: message.message_reference.message_id });
 
   } else {
     const count = Number(args[0]);
-    if (isNaN(count) || count < 1) return client.deleteMessage(msg.channel_id, msg.id);
+    if (isNaN(count) || count < 1) return client.deleteMessage(message.channel_id, message.id);
 
     let remain = count;
-    let before = msg.id;
+    let before = message.id;
     while (remain > 0) {
-      const messages = await client.getMessages(msg.channel_id, { before, limit: Math.min(remain, 100) });
+      const messages = await client.getMessages(message.channel_id, { before, limit: Math.min(remain, 100) });
       const filteredMsgs = filter(messages);
 
       remain -= filteredMsgs.length;
@@ -34,15 +34,15 @@ const execute = async(client, msg, args) => {
       if (messages.length !== filteredMsgs.length || !before) break;
     }
 
-    messagesToDelete.push(msg);
+    messagesToDelete.push(message);
   }
 
   for (let i = 0; i < messagesToDelete.length; i += 100) {
     const chunk = messagesToDelete.slice(i, i + 100);
     if (chunk.length > 1) {
-      await client.bulkDeleteMessages(msg.channel_id, chunk.map(x => x.id));
+      await client.bulkDeleteMessages(message.channel_id, chunk.map(x => x.id));
     } else {
-      await client.deleteMessage(msg.channel_id, chunk[0].id);
+      await client.deleteMessage(message.channel_id, chunk[0].id);
     }
 
     deleted += chunk.length;
@@ -50,8 +50,8 @@ const execute = async(client, msg, args) => {
 
   if (deleted > 0) {
     const content = `🧹 Deleted **${deleted - 1}** messages.`;
-    const reply = msg.isInteraction ? await client.reply(msg, content) : await client.sendMessage(msg.channel_id, content);
-    if (reply?.channel_id && reply?.id) setTimeout(() => client.deleteMessage(msg.channel_id, reply.id).catch(_ => _), 3_500);
+    const reply = message.isInteraction ? await client.reply(msg, content) : await client.sendMessage(message.channel_id, content);
+    if (reply?.channel_id && reply?.id) setTimeout(() => client.deleteMessage(message.channel_id, reply.id).catch(_ => _), 3_500);
   }
 };
 
@@ -67,6 +67,7 @@ export default {
   data: {
     name: 'purge',
     description: 'Delete a specified number of messages from the channel.',
+    slash: true,
     aliases: ['rm', 'clean'],
     usage: 'purge [count]',
     permissions: ['MANAGE_MESSAGES'],

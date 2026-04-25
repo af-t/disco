@@ -1,6 +1,7 @@
 import Discord from './client/level_3.js';
 import tools from './lib/utility.js';
 import dotenv from 'dotenv';
+import fs from 'node:fs/promises';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -24,6 +25,13 @@ await client.ready();
 client.once('READY', async() => {
   client.commands = await tools.importCommands(COMMANDS_PATH);
   tools.deploySlashCommands(client, client.commands);
+});
+
+['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await client.destroy(); }));
+['uncaughtException', 'unhandledRejection'].forEach(ev => process.on(ev, (error) => console.warn(error)));
+
+export default client;
+ent, client.commands);
 });
 
 ['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => { await client.destroy(); }));

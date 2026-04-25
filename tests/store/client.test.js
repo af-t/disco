@@ -9,16 +9,16 @@ test('StoreClient should connect and send/receive data', async (t) => {
   mockWs.readyState = 1; // OPEN
   mockWs.send = t.mock.fn((payload, cb) => {
     const { op, id, args } = JSON.parse(payload);
-    
+
     // Simulate server response
     setTimeout(() => {
       let data = null;
       if (op === 'get') data = 'pong';
-      
+
       const buffer = serialize({ id, data });
       mockWs.emit('message', buffer);
     }, 10);
-    
+
     if (cb) cb();
   });
   mockWs.close = t.mock.fn();
@@ -27,7 +27,7 @@ test('StoreClient should connect and send/receive data', async (t) => {
   const client = new StoreClient({ url: 'ws://mock' });
   
   // Directly set the ws and simulate listeners that client.js would add
-  client.ws = mockWs;
+  client._ws = mockWs;
   client._reconnect = false; // Disable reconnect for test
   client._active = true; // Manually activate for test
   client._startQueueWorker(); // Start the worker

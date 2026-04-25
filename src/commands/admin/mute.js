@@ -27,34 +27,34 @@ function extractUserID(input) {
   if (id?.length > 15) return id;
 }
 
-const execute = async(c, d, a) => {
-  let memberId = extractUserID(a[0]);
-  let duration = parseDuration(a[1]);
+const execute = async(client, message, args) => {
+  let memberId = extractUserID(args[0]);
+  let duration = parseDuration(args[1]);
 
-  if (!memberId && d.message_reference) try {
-    const ref = await c.getMessage(d.channel_id, d.message_reference.message_id);
+  if (!memberId && message.message_reference) try {
+    const ref = await client.getMessage(message.channel_id, message.message_reference.message_id);
     memberId = ref.author.id;
-    duration = parseDuration(a[0]);
+    duration = parseDuration(args[0]);
   } catch (error) {
-    console.warn(error);
+    client.logger.warn(error);
   }
 
   if (!duration) {
-    c.reply(d, 'Invalid duration').catch(console.warn);
+    client.reply(message, 'Invalid duration').catch(client.logger.warn);
     return;
   }
   if (!memberId) {
-    c.reply(d, 'Invalid member').catch(console.warn);
+    client.reply(message, 'Invalid member').catch(client.logger.warn);
     return;
   }
 
   try {
-    await c.muteMember(d.guild_id, memberId, duration);
-    await c.reply(d, `<@!${d.author.id}>\nMuted <@${memberId}>`);
-    await c.deleteMessage(d.channel_id, d.id);
+    await client.muteMember(message.guild_id, memberId, duration);
+    await client.reply(message, `<@!${message.author.id}>\nMuted <@${memberId}>`);
+    await client.deleteMessage(message.channel_id, message.id);
   } catch (error) {
-    console.warn(error);
-    c.reply(d, `Failed to mute <@${memberId}>`).catch(console.warn);
+    client.logger.warn(error);
+    client.reply(message, `Failed to mute <@${memberId}>`).catch(client.logger.warn);
   }
 };
 
@@ -63,6 +63,7 @@ export default {
   data: {
     name: 'mute',
     description: 'Mute a member for a specified duration.',
+    slash: true,
     usage: 'mute {member} {duration}',
     permissions: ['MUTE_MEMBERS'],
     options: [

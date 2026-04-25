@@ -63,3 +63,51 @@ test('StoreManager (Engine) should return metadata and stats', async () => {
     await fs.rm(diskPath, { recursive: true, force: true });
   }
 });
+
+test('StoreManager (Engine) should respect custom TTL', async () => {
+  const diskPath = join(process.cwd(), 'tests_tmp_engine_ttl');
+  const engine = new Engine({ diskPath, memoryTTL: 10000 });
+  await engine.ready();
+
+  try {
+    // Set with short TTL (100ms)
+    await engine.set('ttl-test', 'data', { ttl: 100 });
+    
+    // Immediate check
+    assert.strictEqual(await engine.get('ttl-test'), 'data');
+
+    // Wait for expiration
+    await new Promise(r => setTimeout(r, 200));
+    
+    const val = await engine.get('ttl-test');
+    assert.strictEqual(val, undefined, 'Value should be expired');
+  } finally {
+    await engine.close();
+    await fs.rm(diskPath, { recursive: true, force: true });
+  }
+});
+
+test('StoreManager (Engine) should trigger onDelete hook', async () => {
+  const diskPath = join(process.cwd(), 'tests_tmp_engine_delete');
+  const engine = new Engine({ diskPath });
+  await engine.ready();
+
+  let deletedKey = null;
+  let deletedMeta = null;
+  engine.onDelete = (key, meta) => {
+    deletedKey = key;
+    deletedMeta = meta;
+  };
+
+  try {
+    await engine.set('del-test', 'some-data');
+    await engine.delete('del-test');
+    
+    assert.strictEqual(deletedKey, 'del-test');
+    assert.ok(deletedMeta);
+    assert.strictEqual(deletedMeta.created > 0, true);
+  } finally {
+    await engine.close();
+    await fs.rm(diskPath, { recursive: true, force: true });
+  }
+});

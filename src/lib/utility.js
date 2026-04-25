@@ -145,7 +145,7 @@ async function deploySlashCommands(client, commands) {
 
   for (const key in commands) {
     const cmd = commands[key];
-    if (cmd.data && cmd.data.name && cmd.data.description) {
+    if (cmd.data && cmd.data.name && cmd.data.description && cmd.data.slash === true) {
       const name = cmd.data.name.toLowerCase();
       if (!seen.has(name)) {
         seen.add(name);

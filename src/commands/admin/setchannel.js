@@ -36,7 +36,7 @@ export default {
   execute,
   data: {
     name: 'setchannel',
-    //description: 'Configure channels for welcome or leave messages.',
+    description: 'Configure channels for welcome or leave messages.',
     usage: 'setchannel {welcome|leave} {#channel}',
     permissions: ['MANAGE_GUILD'],
     options: [

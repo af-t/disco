@@ -25,7 +25,7 @@ const execute = async (client, message) => {
 
     await client.reply(message, null, false, { embeds: [embed] });
   } catch (error) {
-    console.error(error);
+    client.logger.error(error);
     await client.reply(message, 'Failed to fetch server information.');
   }
 };
@@ -35,6 +35,7 @@ export default {
   data: {
     name: 'serverinfo',
     description: 'Show information about the server.',
+    slash: true,
     aliases: ['si', 'server'],
     usage: 'serverinfo'
   }

@@ -38,6 +38,7 @@ export default {
   data: {
     name: 'help',
     description: 'Show the list of available commands.',
+    slash: true,
     aliases: ['h'],
     usage: 'help [command]',
     options: [

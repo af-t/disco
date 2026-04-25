@@ -28,7 +28,8 @@
   },
   "homepage": "https://github.com/af-t/disco#readme",
   "dependencies": {
-    "dotenv": "^17.4.0",
+    "dotenv": "^17.4.2",
+    "openrouter": "github:af-t/openrouter",
     "ws": "^8.20.0"
   }
 }

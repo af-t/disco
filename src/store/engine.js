@@ -9,6 +9,7 @@ const ACTION = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3, HAS: 4, META
 const LOCATION = Object.freeze({ MEMORY: 0, DISK: 1 });
 
 class StoreManager {
+  onDelete   = null;
   _notifier  = null;
   _metadata  = new Map();
   _data      = new Map();
@@ -89,13 +90,14 @@ class StoreManager {
    * Store a value.
    * @param {string}  key
    * @param {*}       data
-   * @param {boolean} [isCache=false]  true → item gets diskTTL when demoted;
-   *                                   false → item lives on disk until deleted
+   * @param {boolean|object} [options=false]  true → item gets diskTTL when demoted;
+   *                                          false → item lives on disk until deleted;
+   *                                          object → { isCache: boolean, ttl: number }
    */
-  async set(key, data, isCache = false) {
+  async set(key, data, options = false) {
     if (typeof key !== 'string') throw new TypeError('key must be a string');
     this._stats.operations.set++;
-    return this._addAction(ACTION.SET, key, data, isCache);
+    return this._addAction(ACTION.SET, key, data, options);
   }
 
   /** Retrieve a value (or undefined if missing / expired). */
@@ -231,7 +233,7 @@ class StoreManager {
     return n;
   }
 
-  _addAction(action, key, data, isCache) {
+  _addAction(action, key, data, options) {
     if (!this._active) return Promise.resolve();
 
     return new Promise((resolve) => {
@@ -240,6 +242,11 @@ class StoreManager {
       switch (action) {
         case ACTION.CLEAR:
           task = async () => {
+            if (this.onDelete) {
+              for (const [k, m] of this._metadata.entries()) {
+                try { await this.onDelete(k, m); } catch { /* ignore */ }
+              }
+            }
             this._metadata.clear();
             this._data.clear();
             if (this.diskPath) {
@@ -252,6 +259,9 @@ class StoreManager {
 
         case ACTION.SET:
           task = async () => {
+            const isCache = typeof options === 'boolean' ? options : !!options?.isCache;
+            const customTTL = typeof options === 'object' ? options?.ttl : null;
+
             const existing = this._metadata.get(key);
             const meta = existing ?? {
               created:      Date.now(),
@@ -261,10 +271,14 @@ class StoreManager {
               location:     LOCATION.MEMORY,
               locationFile: null,
               dataSizeV8:   0,
-              expired:      Date.now() + this.memoryTTL,
+              expired:      customTTL ? (Date.now() + customTTL) : (Date.now() + this.memoryTTL),
             };
 
             meta.accessCount = 0;
+            if (customTTL !== null) {
+              meta.customTTL = customTTL;
+              meta.expired = Date.now() + customTTL;
+            }
 
             // Remove stale disk file if key was previously demoted
             if (meta.location === LOCATION.DISK) {
@@ -284,7 +298,9 @@ class StoreManager {
             }
 
             meta.lastAccess = Date.now();
-            meta.expired    = Date.now() + this.memoryTTL;
+            if (customTTL === null) {
+              meta.expired = Date.now() + this.memoryTTL;
+            }
             this._data.set(key, data);
             this._metadata.set(key, meta);
             resolve();
@@ -300,6 +316,15 @@ class StoreManager {
             }
 
             const meta = this._metadata.get(key);
+
+            // Check TTL before refreshing or promoting
+            if (Date.now() > meta.expired) {
+              this._stats.cache.misses++;
+              await this._delete(key);
+              resolve();
+              return;
+            }
+
             meta.accessCount++;
             meta.lastAccess = Date.now();
 
@@ -326,7 +351,7 @@ class StoreManager {
                 const raw = await fs.readFile(meta.locationFile);
                 const value = deserialize(raw);
                 meta.location = LOCATION.MEMORY;
-                meta.expired  = Date.now() + this.memoryTTL;
+                meta.expired  = meta.customTTL ? (Date.now() + meta.customTTL) : (Date.now() + this.memoryTTL);
                 this._data.set(key, value);
                 this._metadata.set(key, meta);
                 await fs.rm(meta.locationFile).catch(() => {});
@@ -342,7 +367,7 @@ class StoreManager {
             }
 
             // Memory hit — refresh sliding TTL
-            meta.expired = Date.now() + this.memoryTTL;
+            meta.expired = meta.customTTL ? (Date.now() + meta.customTTL) : (Date.now() + this.memoryTTL);
             this._metadata.set(key, meta);
             this._stats.cache.hits++;
             resolve(this._data.get(key));
@@ -383,11 +408,8 @@ class StoreManager {
   }
 
   async _startQueueWorker() {
-    let idleCycles = 0;
-
     while (this._active) {
-      let didWork = false;
-
+      // Process all pending tasks
       while (this._queues.length && this._active) {
         const task = this._queues.shift();
         try {
@@ -396,31 +418,17 @@ class StoreManager {
           this._stats.errors.queue++;
           this._log('error', 'queue task failed', err);
         }
-        didWork = true;
       }
 
-      if (didWork || this._queues.length > 0) {
-        idleCycles = 0;
-      } else {
-        idleCycles++;
-      }
+      if (!this._active) break;
 
-      if (idleCycles >= 7) {
-        idleCycles = 0;
-        //this._log('info', 'idle: sleeping until notified');
-
-        // FIX: set _notifier synchronously, then check the queue one more
-        // time inside the promise executor.  This closes the race window where
-        // a task could arrive after the queue check but before _notifier is
-        // assigned, causing it to be dropped silently.
-        await new Promise((resolve) => {
-          this._notifier = resolve;
-          if (this._queues.length > 0) resolve(); // task sneaked in — wake immediately
-        });
-        this._notifier = null;
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 80));
-      }
+      // Wait for new tasks
+      await new Promise((resolve) => {
+        this._notifier = resolve;
+        // Check again in case a task was added after the loop but before setting notifier
+        if (this._queues.length > 0) resolve();
+      });
+      this._notifier = null;
     }
   }
 
@@ -490,6 +498,14 @@ class StoreManager {
   async _delete(key) {
     const meta = this._metadata.get(key);
     if (!meta) return;
+
+    if (this.onDelete) {
+      try {
+        await this.onDelete(key, meta);
+      } catch (err) {
+        this._log('error', 'onDelete hook failed for key', key, err);
+      }
+    }
 
     if (meta.location === LOCATION.DISK && meta.locationFile) {
       try { await fs.rm(meta.locationFile); } catch { /* already gone */ }

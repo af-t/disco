@@ -538,6 +538,36 @@ class DiscordClient extends level1 {
   async deleteGuildIntegration(guild_id, integration_id) {
     return this.makeRequest('DELETE', `/guilds/${guild_id}/integrations/${integration_id}`);
   }
+
+  async getGuildBan(guild_id, user_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/bans/${user_id}`);
+  }
+
+  async getGuildBans(guild_id, options = {}) {
+    const params = new URLSearchParams(options);
+    return this.makeRequest('GET', `/guilds/${guild_id}/bans?${params}`);
+  }
+
+  async getGuildPruneCount(guild_id, options = {}) {
+    const params = new URLSearchParams(options);
+    return this.makeRequest('GET', `/guilds/${guild_id}/prune?${params}`);
+  }
+
+  async beginGuildPrune(guild_id, options = {}) {
+    return this.makeRequest('POST', `/guilds/${guild_id}/prune`, options);
+  }
+
+  async getGuildWidget(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/widget`);
+  }
+
+  async getGuildWidgetSettings(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/widget/settings`);
+  }
+
+  async modifyGuildWidget(guild_id, options = {}) {
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/widget`, options);
+  }
 }
 
 export default DiscordClient;

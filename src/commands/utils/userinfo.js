@@ -33,7 +33,7 @@ const execute = async (client, message, args) => {
 
     await client.reply(message, null, false, { embeds: [embed] });
   } catch (error) {
-    console.error(error);
+    client.logger.error(error);
     await client.reply(message, 'Failed to fetch user information.');
   }
 };
@@ -43,6 +43,7 @@ export default {
   data: {
     name: 'userinfo',
     description: 'Show information about a user.',
+    slash: true,
     aliases: ['ui', 'whois', 'user'],
     usage: 'userinfo [user]',
     options: [

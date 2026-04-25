@@ -1,17 +1,17 @@
-const execute = async(c, d, a) => {
+const execute = async(client, message, args) => {
   let response;
   const uids = new Set();
   const reason = [];
 
-  if (d.message_reference) try {// Ban referenced user
-    const m = await c.getMessage(d.channel_id, d.message_reference.message_id);
+  if (message.message_reference) try {// Ban referenced user
+    const m = await client.getMessage(message.channel_id, message.message_reference.message_id);
     uids.add(m.author.id);
-    reason.push(...a);
+    reason.push(...args);
   } catch (error) {
-    console.warn(error);
+    client.logger.warn(error);
   }
 
-  if (uids.size < 1) for (const i of a) {// Gets user ids from args
+  if (uids.size < 1) for (const i of args) {// Gets user ids from args
     let id = i.match(/<@!?(\d+)>/)?.[1];
     if (!id && !isNaN(Number(i))) id = i;
     if (id?.length > 15) uids.add(id);
@@ -24,16 +24,16 @@ const execute = async(c, d, a) => {
     let count = 0;
     const banReason = reason.join(' ');
     for (const uid of uids) try {
-      await c.banMember(d.guild_id, uid, { reason: banReason });
+      await client.banMember(message.guild_id, uid, { reason: banReason });
       count++;
     } catch (error) {
-      console.warn(error);
+      client.logger.warn(error);
     }
     response = `Banned **${count}** user${count > 1 ? 's' : ''}`;
   }
 
   // Feedback
-  c.reply(d, response).catch(console.warn);
+  client.reply(message, response).catch(client.logger.warn);
 };
 
 export default {
@@ -41,6 +41,7 @@ export default {
   data: {
     name: 'ban',
     description: 'Ban a user from the server.',
+    slash: true,
     usage: 'ban {user} [reason]',
     permissions: ['BAN_MEMBERS'],
     options: [

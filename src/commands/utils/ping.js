@@ -22,6 +22,7 @@ export default {
   data: {
     name: 'ping',
     description: 'Check bot latency and websocket health',
+    slash: true,
     aliases: ['p'],
     usage: 'ping'
   }

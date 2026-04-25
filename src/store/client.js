@@ -6,6 +6,7 @@ const ACTION   = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3, HAS: 4, ME
 const LOCATION = Object.freeze({ MEMORY: 0, SERVER: 1 });
 
 class StoreClient {
+  onDelete   = null;
   _notifier  = null;
   _metadata  = new Map();
   _data      = new Map();
@@ -80,10 +81,18 @@ class StoreClient {
 
   // --- API StoreClient ---
 
-  async set(key, data, isCache = false) {
+  /**
+   * Store a value.
+   * @param {string}  key
+   * @param {*}       data
+   * @param {boolean|object} [options=false]  true → item gets serverTTL when demoted;
+   *                                          false → item lives on server until deleted;
+   *                                          object → { isCache: boolean, ttl: number }
+   */
+  async set(key, data, options = false) {
     if (typeof key !== 'string') throw new TypeError('key must be a string');
     this._stats.operations.set++;
-    return this._addAction(ACTION.SET, key, data, isCache);
+    return this._addAction(ACTION.SET, key, data, options);
   }
 
   async get(key) {
@@ -216,7 +225,7 @@ class StoreClient {
     return n;
   }
 
-  _addAction(action, key, data, isCache) {
+  _addAction(action, key, data, options) {
     if (!this._active && action !== ACTION.ATTR_SET && action !== ACTION.ATTR_GET) return Promise.resolve();
 
     return new Promise((resolve) => {
@@ -225,6 +234,11 @@ class StoreClient {
       switch (action) {
         case ACTION.CLEAR:
           task = async () => {
+            if (this.onDelete) {
+              for (const [k, m] of this._metadata.entries()) {
+                try { await this.onDelete(k, m); } catch { /* ignore */ }
+              }
+            }
             this._metadata.clear();
             this._data.clear();
             try { await this._send('clear'); } catch { /* server might be down, ignore */ }
@@ -234,19 +248,27 @@ class StoreClient {
 
         case ACTION.SET:
           task = async () => {
+            const isCache = typeof options === 'boolean' ? options : !!options?.isCache;
+            const customTTL = (typeof options === 'object' && typeof options?.ttl === 'number') ? options.ttl : null;
+
             const existing = this._metadata.get(key);
             const meta = existing ?? {
               created:      Date.now(),
               isCache:      !!isCache,
+              customTTL:    customTTL,
               lastAccess:   Date.now(),
               accessCount:  0,
               location:     LOCATION.MEMORY,
               dataSizeV8:   0,
-              expired:      Date.now() + this.memoryTTL,
+              expired:      customTTL ? (Date.now() + customTTL) : (Date.now() + this.memoryTTL),
             };
 
             meta.accessCount = 0;
             meta.location = LOCATION.MEMORY;
+            if (customTTL !== null) {
+              meta.customTTL = customTTL;
+              meta.expired = Date.now() + customTTL;
+            }
 
             try {
               meta.dataSizeV8 = serialize(data).length;
@@ -258,7 +280,9 @@ class StoreClient {
             }
 
             meta.lastAccess = Date.now();
-            meta.expired    = Date.now() + this.memoryTTL;
+            if (customTTL === null) {
+              meta.expired = Date.now() + this.memoryTTL;
+            }
             this._data.set(key, data);
             this._metadata.set(key, meta);
             resolve();
@@ -269,11 +293,19 @@ class StoreClient {
           task = async () => {
             const meta = this._metadata.get(key);
 
+            // Check TTL before refreshing or promoting
+            if (meta && Date.now() > meta.expired) {
+              this._stats.cache.misses++;
+              await this._delete(key);
+              resolve();
+              return;
+            }
+
             // 1. Check memory first
             if (meta?.location === LOCATION.MEMORY) {
               meta.accessCount++;
               meta.lastAccess = Date.now();
-              meta.expired = Date.now() + this.memoryTTL;
+              meta.expired = meta.customTTL ? (Date.now() + meta.customTTL) : (Date.now() + this.memoryTTL);
               this._stats.cache.hits++;
               resolve(this._data.get(key));
               return;
@@ -282,13 +314,6 @@ class StoreClient {
             // 2. Check server (if we know it's there OR we don't know it's NOT there)
             // If we don't have meta, we check server to support cold-start / persistent server data.
             if (!meta || meta.location === LOCATION.SERVER) {
-              if (meta && Date.now() > meta.expired) {
-                this._stats.cache.misses++;
-                await this._delete(key);
-                resolve();
-                return;
-              }
-
               this._stats.cache.promotions++;
               try {
                 const value = await this._send('get', [key]);
@@ -296,6 +321,7 @@ class StoreClient {
                   const newMeta = meta ?? {
                     created:      Date.now(),
                     isCache:      true,
+                    customTTL:    null,
                     lastAccess:   Date.now(),
                     accessCount:  0,
                     location:     LOCATION.MEMORY,
@@ -305,7 +331,7 @@ class StoreClient {
 
                   newMeta.location = LOCATION.MEMORY;
                   newMeta.lastAccess = Date.now();
-                  newMeta.expired = Date.now() + this.memoryTTL;
+                  newMeta.expired = newMeta.customTTL ? (Date.now() + newMeta.customTTL) : (Date.now() + this.memoryTTL);
                   newMeta.accessCount++;
                   try { newMeta.dataSizeV8 = serialize(value).length; } catch { /* ignore */ }
 
@@ -378,11 +404,8 @@ class StoreClient {
   }
 
   async _startQueueWorker() {
-    let idleCycles = 0;
-
     while (this._active) {
-      let didWork = false;
-
+      // Process all pending tasks
       while (this._queues.length && this._active) {
         const task = this._queues.shift();
         try {
@@ -391,25 +414,17 @@ class StoreClient {
           this._stats.errors.queue++;
           this._log('error', 'queue task failed', err);
         }
-        didWork = true;
       }
 
-      if (didWork || this._queues.length > 0) {
-        idleCycles = 0;
-      } else {
-        idleCycles++;
-      }
+      if (!this._active) break;
 
-      if (idleCycles >= 7) {
-        idleCycles = 0;
-        await new Promise((resolve) => {
-          this._notifier = resolve;
-          if (this._queues.length > 0) resolve();
-        });
-        this._notifier = null;
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 80));
-      }
+      // Wait for new tasks
+      await new Promise((resolve) => {
+        this._notifier = resolve;
+        // Check again in case a task was added after the loop but before setting notifier
+        if (this._queues.length > 0) resolve();
+      });
+      this._notifier = null;
     }
   }
 
@@ -464,6 +479,14 @@ class StoreClient {
     const meta = this._metadata.get(key);
     if (!meta) return;
 
+    if (this.onDelete) {
+      try {
+        await this.onDelete(key, meta);
+      } catch (err) {
+        this._log('error', 'onDelete hook failed for key', key, err);
+      }
+    }
+
     if (meta.location === LOCATION.SERVER) {
       try { await this._send('delete', [key]); } catch { /* ignore */ }
     }
@@ -479,17 +502,20 @@ class StoreClient {
 
     try {
       const data = this._data.get(key);
-      await this._send('set', [key, data, meta.isCache]);
+      const options = { isCache: meta.isCache, ttl: meta.customTTL };
+      await this._send('set', [key, data, options]);
 
       meta.location = LOCATION.SERVER;
-      meta.expired  = meta.isCache ? Date.now() + this.serverTTL : Infinity;
+      meta.expired  = meta.isCache ? (Date.now() + this.serverTTL) : Infinity;
+      if (meta.customTTL) meta.expired = Date.now() + meta.customTTL;
+      
       this._data.delete(key);
       this._metadata.set(key, meta);
       this._stats.cache.demotions++;
       this._log('debug', 'demoted to server:', key);
     } catch (err) {
       meta.location = LOCATION.MEMORY;
-      meta.expired  = Date.now() + this.memoryTTL;
+      meta.expired  = meta.customTTL ? (Date.now() + meta.customTTL) : (Date.now() + this.memoryTTL);
       this._metadata.set(key, meta);
       this._stats.errors.serverWrite++;
       this._log('error', 'failed to demote key', key, err.message);
