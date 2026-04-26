@@ -25,6 +25,46 @@ const sendTyping = async(client, message, notify) => {
   }
 };
 
+const processAttachments = async(msg, sessionPath) => {
+  const attachments = [];
+  if (!msg.attachments) return attachments;
+
+  for (const att of msg.attachments) {
+    if (att.content_type.startsWith('image')) {
+      attachments.push({
+        type: 'image',
+        source: {
+          type: 'url',
+          url: att.url
+        }
+      });
+      attachments.push({ type: 'text', text: `<filename>${att.filename}</filename>` });
+      continue;
+    }
+
+    if (att.content_type.includes('pdf')) {
+      attachments.push({
+        type: 'document',
+        source: {
+          type: 'url',
+          url: att.url
+        }
+      });
+      attachments.push({ type: 'text', text: `<filename>${att.filename}</filename>` });
+      continue;
+    }
+
+    if (att.content_type.startsWith('text')) {
+      const fileData = await (await fetch(att.url)).arrayBuffer();
+      const filePath = path.join(sessionPath, att.filename);
+      await fs.writeFile(filePath, Buffer.from(fileData));
+      attachments.push({ type: 'text', text: `<filename>${att.filename}</filename>` });
+      continue;
+    }
+  }
+  return attachments;
+};
+
 const execute = async(client, message, _, args) => {
   if (!args) return;
   if (!client.agent) client.agent = agent; // for debugging
@@ -52,40 +92,17 @@ const execute = async(client, message, _, args) => {
     };
   }
 
-  const attachments = [];
-  if (message.attachments) {
-    for (const att of message.attachments) {
-      if (att.content_type.startsWith('image')) {
-        attachments.push({
-          type: 'image',
-          source: {
-            type: 'url',
-            url: att.url
-          }
-        });
-        attachments.push({ type: 'text', text: `<filename>${att.filename}</filename>` });
-        continue;
-      }
+  const attachments = await processAttachments(message, session.path);
 
-      if (att.content_type.includes('pdf')) {
-        attachments.push({
-          type: 'document',
-          source: {
-            type: 'url',
-            url: att.url
-          }
-        });
-        attachments.push({ type: 'text', text: `<filename>${att.filename}</filename>` });
-        continue;
+  if (message.message_reference) {
+    try {
+      const refMessage = await client.getMessage(message.message_reference.channel_id, message.message_reference.message_id);
+      if (refMessage) {
+        const refAttachments = await processAttachments(refMessage, session.path);
+        attachments.push(...refAttachments);
       }
-
-      if (att.content_type.startsWith('text')) {
-        const fileData = await (await fetch(att.url)).arrayBuffer();
-        const filePath = path.join(session.path, att.filename);
-        await fs.writeFile(filePath, Buffer.from(fileData));
-        attachments.push({ type: 'text', text: `<filename>${att.filename}</filename>` });
-        continue;
-      }
+    } catch (err) {
+      console.error('Error fetching referenced message:', err);
     }
   }
 
