@@ -544,6 +544,7 @@ class StoreManager {
 
   /** Synchronous bulk-demote used only during shutdown (close()). */
   async _demoteAll() {
+    if (!this.diskPath) return;
     for (const [key, meta] of this._metadata.entries()) {
       if (meta.location === LOCATION.MEMORY && meta.dataSizeV8 > 0) {
         await this._demote(key);

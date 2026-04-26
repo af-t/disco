@@ -72,12 +72,14 @@ class DiscordClient extends EventEmitter {
       : INTENT_BITS;
     this.shardId = shardId ?? [0, 1];
     this.config  = config;
-    this.store   = null;
+    this.store   = config.store;
   }
 
   async _init() {
-    this.store = new StorageManager(this.config);
-    await this.store.ready();
+    if (!this.store) {
+      this.store = new StorageManager(this.config);
+      await this.store.ready();
+    }
     this._initialised = true;
     this.connect();
   }
@@ -134,11 +136,6 @@ class DiscordClient extends EventEmitter {
       this._ws.removeAllListeners();
       this._ws.close(1000, 'Client destroyed');
       this._ws = null;
-    }
-
-    if (this.store) {
-      await this.store.close();
-      this.store = null;
     }
 
     this._session = {};

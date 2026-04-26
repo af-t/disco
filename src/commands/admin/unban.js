@@ -1,3 +1,5 @@
+import { createCase, resolveCase, getCasesByUser } from '../../lib/case.js';
+
 const execute = async(client, message, args) => {
   let response;
   const uids = new Set();
@@ -25,6 +27,11 @@ const execute = async(client, message, args) => {
     const unbanReason = reason.join(' ');
     for (const uid of uids) try {
       await client.unbanMember(message.guild_id, uid, unbanReason);
+      await createCase(client, message.guild_id, 'unban', uid, message.author.id, unbanReason);
+      const banCases = await getCasesByUser(client, message.guild_id, uid, 50);
+      for (const c of banCases) {
+        if (c.type === 'ban' && !c.resolved) await resolveCase(client, message.guild_id, c.id);
+      }
       count++;
     } catch (error) {
       client.logger.warn(error);

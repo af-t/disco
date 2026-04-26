@@ -18,49 +18,60 @@ class DiscordClient extends level2 {
 
   async uploadToDiscord(channel_id, files = []) {
     if (!files.length) throw new Error('files must contain at least 1 item');
-    files = (await Promise.allSettled(files.map(x => this._fileInfo(x)))).filter(x => x.status === 'fulfilled').map(x => x.value);
-    const cached = [];
+    files = (await Promise.allSettled(files.map(x => this._fileInfo(x))))
+      .filter(x => x.status === 'fulfilled')
+      .map(x => x.value);
+
+    const results = new Array(files.length);
     const upload = [];
+    const uploadIndices = [];
 
     for (let i = 0; i < files.length; i++) {
-      if ((await this.store.has(`sum:${files[i].checksum}`))) {
-        cached.push({ ...(await this.store.get(`sum:${files[i].checksum}`)), id: i });
-        continue;
+      const cached = await this.store.get(`sum:${files[i].checksum}`);
+      if (cached) {
+        results[i] = { ...cached, id: i };
+      } else {
+        upload.push({ ...files[i], id: i });
+        uploadIndices.push(i);
       }
-      upload.push({ ...files[i], id: i });
     }
 
-    const { attachments } = await this.makeRequest(
-      'POST',
-      `/channels/${channel_id}/attachments`,
-      {
-        files: upload.map(x => ({ filename: x.filename, file_size: x.file_size }))
-      }
-    );
+    if (upload.length > 0) {
+      const response = await this.makeRequest(
+        'POST',
+        `/channels/${channel_id}/attachments`,
+        {
+          files: upload.map(x => ({ filename: x.filename, file_size: x.file_size }))
+        }
+      );
 
-    await Promise.all(attachments.map(async(x, i) => {
-      const stream = fs.createReadStream(upload[i].filepath);
-      await fetch(x.upload_url, {
-        method: 'PUT',
-        headers: {
-          'Content-Length': upload[i].file_size,
-          'Content-Type': 'application/octet-stream'
-        },
-        body: stream
+      const attachments = response.attachments || [];
+      await Promise.all(attachments.map(async(x, i) => {
+        const stream = fs.createReadStream(upload[i].filepath);
+        const res = await fetch(x.upload_url, {
+          method: 'PUT',
+          headers: {
+            'Content-Length': upload[i].file_size,
+            'Content-Type': 'application/octet-stream'
+          },
+          body: stream,
+          duplex: 'half'
+        });
+        if (!res.ok) throw new Error(`Failed to upload file '${upload[i].filename}': ${res.statusText}`);
+      }));
+
+      attachments.forEach((x, i) => {
+        const data = {
+          id: uploadIndices[i],
+          uploaded_filename: x.upload_filename,
+          filename: upload[i].filename
+        };
+        this.store.set(`sum:${upload[i].checksum}`, data);
+        results[uploadIndices[i]] = data;
       });
-    }));
+    }
 
-    attachments.forEach((x, i) => {
-      const data = {
-        id: upload[i].id,
-        uploaded_filename: x.upload_filename,
-        filename: upload[i].filename
-      };
-      this.store.set(`sum:${upload[i].checksum}`, data);
-      cached.push(data);
-    });
-
-    return cached;
+    return results.filter(Boolean);
   }
 
   async _fileInfo(file) {

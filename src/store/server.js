@@ -3,6 +3,7 @@ import util from '../lib/utility.js';
 import { serialize } from 'node:v8';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 
 const server = createServer((req, res) => {
   res.writeHead(204);
@@ -10,6 +11,8 @@ const server = createServer((req, res) => {
 });
 const wss = new WebSocketServer({ server });
 const requestLog = new Map();
+
+const SERVER_DISK_PATH = process.env.STORE_DATA_PATH || join(process.cwd(), 'storage', 'db');
 
 let store = null;
 
@@ -41,7 +44,9 @@ wss.on('connection', (ws, req) => {
 
     if (op === 'new') {
       if (!store) {
-        store = new Engine({ ...args[0], logger: util.Logger }, ...args.slice(1));
+        const clientConfig = args[0] || {};
+        delete clientConfig.diskPath;
+        store = new Engine({ ...clientConfig, diskPath: SERVER_DISK_PATH, logger: util.Logger }, ...args.slice(1));
       }
       ws.send(serialize({ id, data: null }));
       return;

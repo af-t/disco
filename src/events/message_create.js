@@ -1,5 +1,15 @@
 import permissionFlags from '../lib/permission.js';
 
+function formatAgo(since) {
+  const diff = Date.now() - since;
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) return `${hours}h ${minutes % 60}m ago`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s ago`;
+  return `${seconds}s ago`;
+}
+
 const COMMAND_PREFIX = '.';
 const REQUEST_LIMIT = 4;
 
@@ -96,6 +106,35 @@ export default async(client, m) => {
       return; // Silently delete repetitive spam
     }
     await client.store.set(lastMsgKey, m.content, true); // TTL will handle cleanup
+  }
+
+  // AFK detection
+  if (isGuildMessage) {
+    // Hook A: Clear own AFK on message
+    const afkKey = `afk:${m.guild_id}:${m.author.id}`;
+    const afkData = await client.store.get(afkKey);
+    if (afkData) {
+      await client.store.delete(afkKey);
+      const ago = formatAgo(afkData.since);
+      const reply = await client.sendMessage(m.channel_id, `👋 Welcome back **${m.author.global_name || m.author.username}**! You were AFK since ${ago}.`);
+      setTimeout(() => client.deleteMessage(m.channel_id, reply.id).catch(() => {}), 5000);
+    }
+
+    // Hook B: Notify about AFK-mentioned users
+    const mentions = [...m.content.matchAll(/<@!?(\d+)>/g)].map(m => m[1]);
+    const afkMentions = [];
+    for (const uid of [...new Set(mentions)]) {
+      if (uid === m.author.id) continue;
+      const mentionedAfk = await client.store.get(`afk:${m.guild_id}:${uid}`);
+      if (mentionedAfk) {
+        afkMentions.push({ id: uid, ...mentionedAfk });
+      }
+    }
+    if (afkMentions.length) {
+      const lines = afkMentions.map(a => `💤 <@${a.id}> is AFK: _${a.message}_ (${formatAgo(a.since)})`);
+      const reply = await client.sendMessage(m.channel_id, lines.join('\n'));
+      setTimeout(() => client.deleteMessage(m.channel_id, reply.id).catch(() => {}), 10000);
+    }
   }
 
   const {

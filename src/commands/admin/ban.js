@@ -1,3 +1,5 @@
+import { createCase } from '../../lib/case.js';
+
 const execute = async(client, message, args) => {
   let response;
   const uids = new Set();
@@ -25,6 +27,7 @@ const execute = async(client, message, args) => {
     const banReason = reason.join(' ');
     for (const uid of uids) try {
       await client.banMember(message.guild_id, uid, { reason: banReason });
+      await createCase(client, message.guild_id, 'ban', uid, message.author.id, banReason);
       count++;
     } catch (error) {
       client.logger.warn(error);

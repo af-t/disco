@@ -1,3 +1,5 @@
+import { createCase } from '../../lib/case.js';
+
 // Time conversation units
 const TIME_UNITS = {
   s: 1000,
@@ -50,6 +52,7 @@ const execute = async(client, message, args) => {
 
   try {
     await client.muteMember(message.guild_id, memberId, duration);
+    await createCase(client, message.guild_id, 'mute', memberId, message.author.id, args.slice(1).join(' ').trim() || 'No reason', duration);
     await client.reply(message, `<@!${message.author.id}>\nMuted <@${memberId}>`);
     await client.deleteMessage(message.channel_id, message.id);
   } catch (error) {

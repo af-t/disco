@@ -542,7 +542,10 @@ class StoreClient {
         this._connecting = false;
         try {
           this._ws._socket.setNoDelay(true);
-          await this._send('new', [this.config]);
+          // Strip diskPath from config sent to server — server uses its own
+          const serverConfig = { ...this.config };
+          delete serverConfig.diskPath;
+          await this._send('new', [serverConfig]);
           await this._send('ready');
           this._log('info', 'connected to storage server');
         } catch (err) {

@@ -1,3 +1,5 @@
+import { createCase, resolveCase, getCasesByUser } from '../../lib/case.js';
+
 const execute = async(client, message, args) => {
   let response;
   const uids = new Set();
@@ -21,6 +23,11 @@ const execute = async(client, message, args) => {
     let count = 0;
     for (const uid of uids) try {
       await client.unmuteMember(message.guild_id, uid);
+      await createCase(client, message.guild_id, 'unmute', uid, message.author.id, '');
+      const muteCases = await getCasesByUser(client, message.guild_id, uid, 50);
+      for (const c of muteCases) {
+        if (c.type === 'mute' && !c.resolved) await resolveCase(client, message.guild_id, c.id);
+      }
       count++;
     } catch (error) {
       client.logger.warn(error);

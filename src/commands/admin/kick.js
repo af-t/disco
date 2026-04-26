@@ -1,3 +1,5 @@
+import { createCase } from '../../lib/case.js';
+
 const execute = async(client, message, args) => {
   let response;
   const uids = new Set();
@@ -24,6 +26,7 @@ const execute = async(client, message, args) => {
     let count = 0;
     for (const uid of uids) try {
       await client.kickMember(message.guild_id, uid, reason.join(' '));
+      await createCase(client, message.guild_id, 'kick', uid, message.author.id, reason.join(' '));
       count++;
     } catch (error) {
       client.logger.warn(error);

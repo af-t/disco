@@ -30,6 +30,8 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "openrouter": "github:af-t/openrouter",
+    "opusscript": "^0.1.1",
+    "tweetnacl": "^1.0.3",
     "ws": "^8.20.0"
   }
 }

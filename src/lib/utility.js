@@ -8,7 +8,7 @@ class Logger {
   }
 
   _format(c, ...args) {
-    return [`\x1b[0;${c}m*\x1b[m`, `[${this.name}]`, ...args.map(x => typeof x === 'string' ? x : inspect(x, null, 2, true))].join(' ');
+    return [`\r\x1b[0;${c}m*\x1b[m`, `[${this.name}]`, ...args.map(x => typeof x === 'string' ? x : inspect(x, null, 2, true))].join(' ');
   }
 
   _stdout(text) {
