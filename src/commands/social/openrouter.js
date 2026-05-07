@@ -32,9 +32,8 @@ const processAttachments = async(msg, sessionPath) => {
   for (const att of msg.attachments) {
     if (att.content_type.startsWith('image')) {
       attachments.push({
-        type: 'image',
-        source: {
-          type: 'url',
+        type: 'image_url',
+        image_url: {
           url: att.url
         }
       });
@@ -44,10 +43,10 @@ const processAttachments = async(msg, sessionPath) => {
 
     if (att.content_type.includes('pdf')) {
       attachments.push({
-        type: 'document',
-        source: {
-          type: 'url',
-          url: att.url
+        type: 'file',
+        file: {
+          filename: att.filename,
+          file_data: att.url
         }
       });
       attachments.push({ type: 'text', text: `<filename>${att.filename}</filename>` });
@@ -120,7 +119,7 @@ const execute = async(client, message, _, args) => {
       agent.messages = [...session.messages];
 
       const response = await agent.run(prompt);
-      let responseText = response.filter(x => x.text).map(x => x.text).join('');
+      let responseText = typeof response === 'string' ? response : '';
 
       if (responseText.length > 2000) {
         const tempFilePath = path.join(session.path, 'message.txt');

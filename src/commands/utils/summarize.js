@@ -43,7 +43,7 @@ const execute = async (client, message, _, args) => {
     // Clear previous history if any, so the summary is isolated
     agent.messages = [];
     const response = await agent.run(prompt);
-    let responseText = response.filter(x => x.text).map(x => x.text).join('');
+    let responseText = typeof response === 'string' ? response : '';
 
     if (responseText.length > 2000) {
         responseText = responseText.substring(0, 1997) + '...';

@@ -29,7 +29,7 @@
   "homepage": "https://github.com/af-t/disco#readme",
   "dependencies": {
     "dotenv": "^17.4.2",
-    "openrouter": "github:af-t/openrouter",
+    "openrouter": "github:af-t/openrouter#v1.0.0",
     "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.20.0"
