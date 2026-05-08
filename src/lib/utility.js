@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import {join, basename, dirname} from 'node:path';
-import {inspect} from 'node:util';
+import { join } from 'node:path';
+import { inspect } from 'node:util';
 
 class Logger {
   constructor(name) {
@@ -8,7 +8,11 @@ class Logger {
   }
 
   _format(c, ...args) {
-    return [`\r\x1b[0;${c}m*\x1b[m`, `[${this.name}]`, ...args.map(x => typeof x === 'string' ? x : inspect(x, null, 2, true))].join(' ');
+    return [
+      `\r\x1b[0;${c}m*\x1b[m`,
+      `[${this.name}]`,
+      ...args.map((x) => (typeof x === 'string' ? x : inspect(x, null, 2, true))),
+    ].join(' ');
   }
 
   _stdout(text) {
@@ -82,17 +86,19 @@ async function importCommands(path = '', sub = false) {
         for (const key in mod.data) {
           Object.defineProperty(command, key, {
             enumerable: true,
-            get: () => mod.data[key]
+            get: () => mod.data[key],
           });
         }
 
-        if ('aliases' in mod.data && Array.isArray(mod.data.aliases)) for (const alias of mod.data.aliases) if (typeof alias === 'string') {
-          if (alias in commands) {
-            console.warn(`function with name '${alias}' already exists.`);
-            continue;
-          }
-          commands[alias.toLowerCase()] = command;
-        }
+        if ('aliases' in mod.data && Array.isArray(mod.data.aliases))
+          for (const alias of mod.data.aliases)
+            if (typeof alias === 'string') {
+              if (alias in commands) {
+                console.warn(`function with name '${alias}' already exists.`);
+                continue;
+              }
+              commands[alias.toLowerCase()] = command;
+            }
 
         commands[mod.data.name.toLowerCase()] = command;
         loaded++;
@@ -152,17 +158,28 @@ async function deploySlashCommands(client, commands) {
         slashCommands.push({
           name: name,
           description: cmd.data.description,
-          options: (cmd.data.options || []).map(opt => ({
+          options: (cmd.data.options || []).map((opt) => ({
             ...opt,
-            autocomplete: opt.autocomplete || false
-          }))
+            autocomplete: opt.autocomplete || false,
+          })),
         });
       }
     }
   }
 
+  // Compute a hash of the current command definitions to avoid unnecessary PUT
+  const crypto = await import('node:crypto');
+  const hash = crypto.createHash('sha256').update(JSON.stringify(slashCommands)).digest('hex');
+  const lastHash = await client.store.get('slash_commands_hash');
+
+  if (lastHash === hash) {
+    client.logger.info(`Slash commands unchanged, skipping sync (${slashCommands.length} commands)`);
+    return;
+  }
+
   try {
     await client.makeRequest('PUT', `/applications/${client._session.application.id}/commands`, slashCommands);
+    await client.store.set('slash_commands_hash', hash, false);
     const synced = slashCommands.length;
     client.logger.info(`Synced ${synced} slash command${synced > 1 ? 's' : ''} in ${Date.now() - start}ms`);
   } catch (error) {
@@ -170,11 +187,42 @@ async function deploySlashCommands(client, commands) {
   }
 }
 
+/**
+ * Format a timestamp into a human-readable "time ago" string.
+ * @param {number} since - Unix timestamp in milliseconds
+ * @returns {string} Formatted string like "5m 30s ago"
+ */
+function formatAgo(since) {
+  const diff = Date.now() - since;
+  if (diff < 0) return 'just now';
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) return `${hours}h ${minutes % 60}m ago`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s ago`;
+  return `${seconds}s ago`;
+}
+
+async function getPermissions(client, guild_id, member) {
+  if (!member?.roles) return 0n;
+  let perms = 0n;
+  let guildRoles;
+  for (const id of member.roles) {
+    if (!guildRoles) guildRoles = await client.getRoles(guild_id);
+    const role = guildRoles.find((r) => r.id === id);
+    if (role) perms |= BigInt(role.permissions);
+  }
+  return perms;
+}
+
+// eslint-disable-next-line no-global-assign
 console = new Logger('CONSOLE');
 
 export default {
   importCommands,
   importEvents,
   deploySlashCommands,
-  Logger
-}
+  Logger,
+  formatAgo,
+  getPermissions,
+};

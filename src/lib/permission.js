@@ -47,7 +47,7 @@ const permissionFlags = {
   USE_EXTERNAL_SOUNDS: 1n << 45n,
   SEND_VOICE_MESSAGES: 1n << 46n,
   SEND_POLLS: 1n << 49n,
-  USE_EXTERNAL_APPS: 1n << 50n
-}
+  USE_EXTERNAL_APPS: 1n << 50n,
+};
 
 export default permissionFlags;

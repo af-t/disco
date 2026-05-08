@@ -77,7 +77,7 @@ test('StoreManager (Engine) should respect custom TTL', async () => {
     assert.strictEqual(await engine.get('ttl-test'), 'data');
 
     // Wait for expiration
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 200));
 
     const val = await engine.get('ttl-test');
     assert.strictEqual(val, undefined, 'Value should be expired');

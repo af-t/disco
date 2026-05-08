@@ -1,23 +1,20 @@
-function formatAgo(since) {
-  const diff = Date.now() - since;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) return `${hours}h ${minutes % 60}m ago`;
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s ago`;
-  return `${seconds}s ago`;
-}
-
 const execute = async (client, message, args) => {
   const guildId = message.guild_id || 'dm';
   const messageText = args.join(' ').trim() || 'AFK';
 
-  await client.store.set(`afk:${guildId}:${message.author.id}`, {
-    message: messageText,
-    since: Date.now()
-  }, { ttl: 604_800_000 }); // 7 days
+  await client.store.set(
+    `afk:${guildId}:${message.author.id}`,
+    {
+      message: messageText,
+      since: Date.now(),
+    },
+    { ttl: 604_800_000 },
+  ); // 7 days
 
-  await client.reply(message, `👋 **${message.author.global_name || message.author.username}** is now AFK: _${messageText}_`);
+  await client.reply(
+    message,
+    `👋 **${message.author.global_name || message.author.username}** is now AFK: _${messageText}_`,
+  );
 };
 
 export default {
@@ -33,8 +30,8 @@ export default {
         name: 'message',
         description: 'Your AFK message',
         type: 3,
-        required: false
-      }
-    ]
-  }
+        required: false,
+      },
+    ],
+  },
 };

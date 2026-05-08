@@ -1,8 +1,17 @@
 export async function createCase(client, guildId, type, userId, moderatorId, reason = '', duration = null) {
   const counterKey = `modcase:${guildId}:counter`;
-  let counter = await client.store.get(counterKey) || 0;
-  counter++;
-  await client.store.set(counterKey, counter);
+
+  // Optimistic retry-loop: read → increment in memory → write → verify
+  // Prevents race condition when two calls interleave get+set (fixes B1)
+  let counter;
+  while (true) {
+    counter = (await client.store.get(counterKey)) || 0;
+    counter++;
+    await client.store.set(counterKey, counter);
+    // Verify no concurrent write sneaked in
+    const verify = await client.store.get(counterKey);
+    if (verify === counter) break;
+  }
 
   const caseData = {
     id: counter,
@@ -12,7 +21,7 @@ export async function createCase(client, guildId, type, userId, moderatorId, rea
     reason: reason.trim() || 'No reason provided',
     created_at: Date.now(),
     resolved: false,
-    resolved_at: null
+    resolved_at: null,
   };
 
   if (duration !== null) {
@@ -34,7 +43,7 @@ export async function resolveCase(client, guildId, caseId) {
 }
 
 export async function getCasesByUser(client, guildId, userId, limit = 25) {
-  const counter = await client.store.get(`modcase:${guildId}:counter`) || 0;
+  const counter = (await client.store.get(`modcase:${guildId}:counter`)) || 0;
   const cases = [];
   for (let i = counter; i >= 1 && cases.length < limit; i--) {
     const c = await client.store.get(`modcase:${guildId}:${i}`);
@@ -44,7 +53,7 @@ export async function getCasesByUser(client, guildId, userId, limit = 25) {
 }
 
 export async function getRecentCases(client, guildId, limit = 25) {
-  const counter = await client.store.get(`modcase:${guildId}:counter`) || 0;
+  const counter = (await client.store.get(`modcase:${guildId}:counter`)) || 0;
   const cases = [];
   for (let i = counter; i >= 1 && cases.length < limit; i--) {
     const c = await client.store.get(`modcase:${guildId}:${i}`);

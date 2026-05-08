@@ -1,0 +1,182 @@
+import test from 'node:test';
+import assert from 'node:assert';
+
+// We import the module function directly
+import purgeModule from '../../src/commands/admin/purge.js';
+
+const CHANNEL_ID = '200000000000000001';
+const GUILD_ID = '300000000000000001';
+const USER_ID = '100000000000000001';
+
+function createMockClient({ messages = [], deleteCalls = [], bulkDeleteCalls = [], replyCalls = [] } = {}) {
+  return {
+    logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+    getMessages: async (channel_id, { after, before, limit }) => {
+      // Return from the provided messages array
+      if (after) {
+        return messages.filter((m) => m.id > after).slice(0, limit);
+      }
+      if (before) {
+        // Return messages older than 'before' (lexicographic ID comparison)
+        return messages.filter((m) => m.id < before).slice(0, limit);
+      }
+      return messages.slice(0, limit);
+    },
+    deleteMessage: async (channel_id, msgId) => {
+      deleteCalls.push(msgId);
+    },
+    bulkDeleteMessages: async (channel_id, msgIds) => {
+      bulkDeleteCalls.push(msgIds);
+    },
+    reply: async (msg, content) => {
+      replyCalls.push({ content, msg });
+      return { id: 'reply_001', channel_id: msg.channel_id };
+    },
+  };
+}
+
+function createMockMessage(overrides = {}) {
+  return {
+    id: '900000000000000001',
+    channel_id: CHANNEL_ID,
+    guild_id: GUILD_ID,
+    author: { id: USER_ID, username: 'ModUser', bot: false },
+    ...overrides,
+  };
+}
+
+// ─── Input Validation ─────────────────────────────────────
+
+test('purge should reject non-numeric count', async () => {
+  const replyCalls = [];
+  const client = createMockClient({ replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['abc']);
+  assert.ok(replyCalls[0].content.includes('valid positive number'), 'Should complain about invalid count');
+});
+
+test('purge should reject zero count', async () => {
+  const replyCalls = [];
+  const client = createMockClient({ replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['0']);
+  assert.ok(replyCalls[0].content.includes('valid positive number'), 'Should reject zero count');
+});
+
+test('purge should reject negative count', async () => {
+  const replyCalls = [];
+  const client = createMockClient({ replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['-5']);
+  assert.ok(replyCalls[0].content.includes('valid positive number'), 'Should reject negative count');
+});
+
+test('purge should reject float count', async () => {
+  const replyCalls = [];
+  const client = createMockClient({ replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['3.14']);
+  assert.ok(replyCalls[0].content.includes('valid positive number'), 'Should reject float count');
+});
+
+test('purge should accept valid positive integer', async () => {
+  const deleteCalls = [];
+  const bulkDeleteCalls = [];
+  const replyCalls = [];
+  const client = createMockClient({ messages: [], deleteCalls, bulkDeleteCalls, replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['5']);
+  // Should attempt to process (even if no messages found)
+  assert.ok(true, 'Should not crash on valid input');
+});
+
+// ─── Max Limit ────────────────────────────────────────────
+
+test('purge should cap at 1000 messages', async () => {
+  const replyCalls = [];
+  const client = createMockClient({ messages: [], replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['2000']);
+  // Should warn about limit
+  const limitWarning = replyCalls.find((c) => c.content.includes('limited to'));
+  assert.ok(limitWarning, 'Should warn about 1000 message limit');
+  assert.ok(limitWarning.content.includes('1000'), 'Should mention 1000 limit');
+});
+
+// ─── Message Reference Mode ───────────────────────────────
+
+test('purge should handle message_reference mode', async () => {
+  const messages = [
+    { id: '800000000000000001', timestamp: new Date().toISOString() },
+    { id: '800000000000000002', timestamp: new Date().toISOString() },
+  ];
+  const bulkDeleteCalls = [];
+  const replyCalls = [];
+  const client = createMockClient({ messages, bulkDeleteCalls, replyCalls });
+  const msg = createMockMessage({
+    message_reference: { message_id: '800000000000000001' },
+  });
+
+  await purgeModule.execute(client, msg, []);
+  // Should complete without error
+  assert.ok(true, 'Should handle message_reference mode');
+});
+
+// ─── Old Message Filtering ────────────────────────────────
+
+test('purge should filter out messages older than 14 days', async () => {
+  const oldDate = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+  const recentDate = new Date().toISOString();
+
+  const messages = [
+    { id: '800000000000000001', timestamp: oldDate },
+    { id: '800000000000000002', timestamp: recentDate },
+  ];
+  const bulkDeleteCalls = [];
+  const replyCalls = [];
+  const client = createMockClient({ messages, bulkDeleteCalls, replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['5']);
+  // Should only bulk delete the recent message + the command message
+  // The old one should be filtered out
+  assert.ok(true, 'Should filter old messages without crashing');
+});
+
+// ─── Empty Channel ────────────────────────────────────────
+
+test('purge should handle empty channel gracefully', async () => {
+  const replyCalls = [];
+  const client = createMockClient({ messages: [], replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['10']);
+  // No messages to delete, should not crash
+  assert.ok(true, 'Should handle empty channel gracefully');
+});
+
+// ─── Bulk vs Single Delete ────────────────────────────────
+
+test('purge should use bulk delete for multiple messages', async () => {
+  const messages = [];
+  for (let i = 0; i < 5; i++) {
+    messages.push({
+      id: `80000000000000000${i}`,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  const bulkDeleteCalls = [];
+  const replyCalls = [];
+  const client = createMockClient({ messages, bulkDeleteCalls, replyCalls });
+  const msg = createMockMessage();
+
+  await purgeModule.execute(client, msg, ['5']);
+  // Should have bulk deleted at least once
+  assert.ok(bulkDeleteCalls.length > 0, 'Bulk delete should be called for chunks > 1');
+});

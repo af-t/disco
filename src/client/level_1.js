@@ -14,45 +14,40 @@ const DEFAULT_INTENT_KEYS = [
   'GUILD_WEBHOOKS',
   'GUILD_INVITES',
   'GUILD_VOICE_STATES',
-  'GUILD_PRESENCES',
   'GUILD_MESSAGES',
   'GUILD_MESSAGE_REACTIONS',
-  'GUILD_MESSAGE_TYPING',
   'DIRECT_MESSAGES',
   'DIRECT_MESSAGE_REACTIONS',
-  'DIRECT_MESSAGE_TYPING',
   'MESSAGE_CONTENT',
   'GUILD_SCHEDULED_EVENTS',
-  'AUTO_MODERATION_CONFIGURATION',
-  'AUTO_MODERATION_EXECUTION',
-  'GUILD_MESSAGE_POLLS',
-  'DIRECT_MESSAGE_POLLS',
 ];
 
 const gatewayOverride = process.env.DISCORD_GATEWAY_URL;
-const GATEWAY          = gatewayOverride && gatewayOverride.trim() ? gatewayOverride : 'wss://gateway.discord.gg';
-const intentEnv        = process.env.DISCORD_INTENTS;
-const INTENT_BITS      = intentEnv && intentEnv.trim()
-  ? intentEnv.split(',').reduce((acc, k) => acc | (intentBits[k.trim()] || 0), 0)
-  : DEFAULT_INTENT_KEYS.reduce((acc, k) => acc | intentBits[k], 0);
-const RECONNECT_DELAY  = parseInt(process.env.DISCORD_RECONNECT_DELAY, 10) || 5000;
-const RECONNECT_LIMIT  = parseInt(process.env.DISCORD_RECONNECT_LIMIT, 10) || 5;
+const GATEWAY = gatewayOverride && gatewayOverride.trim() ? gatewayOverride : 'wss://gateway.discord.gg';
+const intentEnv = process.env.DISCORD_INTENTS;
+const INTENT_BITS =
+  intentEnv && intentEnv.trim()
+    ? intentEnv.split(',').reduce((acc, k) => acc | (intentBits[k.trim()] || 0), 0)
+    : DEFAULT_INTENT_KEYS.reduce((acc, k) => acc | intentBits[k], 0);
+const RECONNECT_DELAY = parseInt(process.env.DISCORD_RECONNECT_DELAY, 10) || 5000;
+const RECONNECT_LIMIT = parseInt(process.env.DISCORD_RECONNECT_LIMIT, 10) || 5;
+const RECONNECT_MAX_DELAY = 300_000; // 5 minutes cap
 
 class DiscordClient extends EventEmitter {
-  _initPromise      = null;
-  _session          = {};
-  _guilds           = new Set();
-  _gatewayUrl       = GATEWAY;
-  _gatewayParams    = '?v=10&encoding=json';
-  _ws               = null;
-  _heartbeat        = null;    // setInterval handle
-  _heartbeatJitter  = null;    // setTimeout handle for the first jittered beat
-  _reconnectTimer   = null;    // setTimeout handle for reconnect delay
+  _initPromise = null;
+  _session = {};
+  _guilds = new Set();
+  _gatewayUrl = GATEWAY;
+  _gatewayParams = '?v=10&encoding=json';
+  _ws = null;
+  _heartbeat = null; // setInterval handle
+  _heartbeatJitter = null; // setTimeout handle for the first jittered beat
+  _reconnectTimer = null; // setTimeout handle for reconnect delay
   _reconnectAttempt = 0;
-  _initialised      = false;
-  _temps            = new Map();
-  _destroyed        = false;   // prevents reconnect after destroy()
-  _ackReceived      = true;
+  _initialised = false;
+  _temps = new Map();
+  _destroyed = false; // prevents reconnect after destroy()
+  _ackReceived = true;
 
   status = 'closed';
 
@@ -66,13 +61,11 @@ class DiscordClient extends EventEmitter {
     super();
 
     if (!token?.trim?.()) throw new Error('Token is required');
-    this.token   = token;
-    this.intents = intentBits?.length
-      ? intentBits.reduce((a, b) => a | b)
-      : INTENT_BITS;
+    this.token = token;
+    this.intents = intentBits?.length ? intentBits.reduce((a, b) => a | b) : INTENT_BITS;
     this.shardId = shardId ?? [0, 1];
-    this.config  = config;
-    this.store   = config.store;
+    this.config = config;
+    this.store = config.store;
   }
 
   async _init() {
@@ -98,7 +91,7 @@ class DiscordClient extends EventEmitter {
   }
 
   connect() {
-    if (this._destroyed)    throw new Error('Cannot reconnect a destroyed gateway — create a new instance');
+    if (this._destroyed) throw new Error('Cannot reconnect a destroyed gateway — create a new instance');
     if (!this._initialised) throw new Error('Call ready() before connecting');
     if (this.status !== 'closed') return;
 
@@ -113,10 +106,10 @@ class DiscordClient extends EventEmitter {
     this.emit('CONNECT');
     this.status = 'connecting';
 
-    this._ws.on('open',    this._onOpen.bind(this));
+    this._ws.on('open', this._onOpen.bind(this));
     this._ws.on('message', this._onMessage.bind(this));
-    this._ws.on('error',   this._onError.bind(this));
-    this._ws.on('close',   this._onClose.bind(this));
+    this._ws.on('error', this._onError.bind(this));
+    this._ws.on('close', this._onClose.bind(this));
   }
 
   /**
@@ -141,16 +134,22 @@ class DiscordClient extends EventEmitter {
     this._session = {};
     this._guilds.clear();
     this._temps.clear();
-    this._initialised      = false;
+    this._initialised = false;
     this._reconnectAttempt = 0;
-    this.status            = 'closed';
+    this.status = 'closed';
 
     this.removeAllListeners();
   }
 
-  get me()          { return this._session.user; }
-  get application() { return this._session.application; }
-  get guilds()      { return new Set(this._guilds); }
+  get me() {
+    return this._session.user;
+  }
+  get application() {
+    return this._session.application;
+  }
+  get guilds() {
+    return new Set(this._guilds);
+  }
 
   _onOpen() {
     this._ws._socket.setNoDelay(true);
@@ -167,13 +166,13 @@ class DiscordClient extends EventEmitter {
       const { t, s, op, d } = JSON.parse(msg);
 
       switch (op) {
-        case 0:  // Dispatch
+        case 0: // Dispatch
           this._handleDispatch(t, d);
           break;
-        case 7:  // Server-requested reconnect — keep session, reconnect with resume
+        case 7: // Server-requested reconnect — keep session, reconnect with resume
           this._ws.terminate();
           break;
-        case 9:  // Invalid session
+        case 9: // Invalid session
           // d=true means the session can be resumed; d=false means start fresh.
           d ? this._resume() : this._reset();
           break;
@@ -195,32 +194,37 @@ class DiscordClient extends EventEmitter {
   async _handleDispatch(evName, evData) {
     switch (evName) {
       case 'READY':
-        this.status                 = 'ready';
-        this._session.id            = evData.session_id;
-        this._session.user          = evData.user;
-        this._session.application   = evData.application;
-        this._gatewayUrl            = evData.resume_gateway_url;
-        this._reconnectAttempt      = 0;
+        this.status = 'ready';
+        this._session.id = evData.session_id;
+        this._session.user = evData.user;
+        this._session.application = evData.application;
+        this._gatewayUrl = evData.resume_gateway_url;
+        this._reconnectAttempt = 0;
         break;
-      case 'GUILD_CREATE': this._guilds.add(evData.id);    break;
-      case 'GUILD_DELETE': this._guilds.delete(evData.id); break;
+      case 'GUILD_CREATE':
+        this._guilds.add(evData.id);
+        break;
+      case 'GUILD_DELETE':
+        this._guilds.delete(evData.id);
+        break;
       case 'MESSAGE_CREATE':
         this.store.set(`${evData.channel_id}:${evData.id}`, evData);
         break;
-      case 'MESSAGE_UPDATE':
+      case 'MESSAGE_UPDATE': {
         const old = await this.store.get(`${evData.channel_id}:${evData.id}`);
         this.store.set(`${evData.channel_id}:${evData.id}`, evData); // do not use await on store.set to avoid increased latency
         this.store.set(`${evData.channel_id}:${evData.id}:old`, old, true);
         break;
+      }
       case 'MESSAGE_DELETE':
-        if ((await this.store.has(`${evData.channel_id}:${evData.id}`))) {
+        if (await this.store.has(`${evData.channel_id}:${evData.id}`)) {
           const msg = await this.store.get(`${evData.channel_id}:${evData.id}`);
           this.store.set(`${evData.channel_id}:${evData.id}`, msg, true);
         }
         break;
       case 'MESSAGE_DELETE_BULK':
         for (const id of evData.ids) {
-          if ((await this.store.has(`${evData.channel_id}:${id}`))) {
+          if (await this.store.has(`${evData.channel_id}:${id}`)) {
             const msg = await this.store.get(`${evData.channel_id}:${id}`);
             await this.store.set(`${evData.channel_id}:${id}`, msg, true);
           }
@@ -254,10 +258,14 @@ class DiscordClient extends EventEmitter {
       this._reconnectAttempt = 0;
       this.emit('RECONNECT_FAILED', 'Reconnect limit reached — giving up');
     } else {
+      // Exponential backoff with jitter (fixes S5)
+      const baseDelay = RECONNECT_DELAY * Math.pow(2, this._reconnectAttempt - 1);
+      const jitter = Math.random() * 1000;
+      const delay = Math.min(baseDelay + jitter, RECONNECT_MAX_DELAY);
       this._reconnectTimer = setTimeout(() => {
         this._reconnectTimer = null;
         if (!this._destroyed) this.connect();
-      }, RECONNECT_DELAY);
+      }, delay);
     }
   }
 
@@ -281,10 +289,12 @@ class DiscordClient extends EventEmitter {
     }
 
     this._ackReceived = false;
-    this._ws.send(JSON.stringify({
-      op: 1,
-      d: this._session.seq ?? null,
-    }));
+    this._ws.send(
+      JSON.stringify({
+        op: 1,
+        d: this._session.seq ?? null,
+      }),
+    );
   }
 
   _setupHeartbeat(interval) {
@@ -292,53 +302,60 @@ class DiscordClient extends EventEmitter {
     this._ackReceived = true;
 
     // the first beat fires (e.g. if close arrives during the jitter window).
-    this._heartbeatJitter = setTimeout(() => {
-      this._heartbeatJitter = null;
-      this._sendHeartbeat();
-      this._heartbeat = setInterval(this._sendHeartbeat.bind(this), interval);
-    }, Math.floor(Math.random() * interval));
+    this._heartbeatJitter = setTimeout(
+      () => {
+        this._heartbeatJitter = null;
+        this._sendHeartbeat();
+        this._heartbeat = setInterval(this._sendHeartbeat.bind(this), interval);
+      },
+      Math.floor(Math.random() * interval),
+    );
   }
 
   _clearHeartbeat() {
     clearTimeout(this._heartbeatJitter);
     clearInterval(this._heartbeat);
     this._heartbeatJitter = null;
-    this._heartbeat       = null;
+    this._heartbeat = null;
   }
 
   _reset() {
-    this._gatewayUrl  = GATEWAY;
-    this._session.id  = null;
+    this._gatewayUrl = GATEWAY;
+    this._session.id = null;
     this._session.seq = null;
     this._ws.terminate();
   }
 
   _resume() {
-    this._ws.send(JSON.stringify({
-      op: 6,
-      d: {
-        token:      this.token,
-        session_id: this._session.id,
-        seq:        this._session.seq,
-      },
-    }));
+    this._ws.send(
+      JSON.stringify({
+        op: 6,
+        d: {
+          token: this.token,
+          session_id: this._session.id,
+          seq: this._session.seq,
+        },
+      }),
+    );
   }
 
   _identify() {
-    this._ws.send(JSON.stringify({
-      op: 2,
-      d: {
-        token:    this.token,
-        intents:  this.intents,
-        shard:    this.shardId,
-        compress: true,
-        properties: {
-          os:      process.platform,
-          browser: 'discord-gateway-js',
-          device:  'discord-gateway-js',
+    this._ws.send(
+      JSON.stringify({
+        op: 2,
+        d: {
+          token: this.token,
+          intents: this.intents,
+          shard: this.shardId,
+          compress: true,
+          properties: {
+            os: process.platform,
+            browser: 'discord-gateway-js',
+            device: 'discord-gateway-js',
+          },
         },
-      },
-    }));
+      }),
+    );
   }
 
   _decompress(data) {

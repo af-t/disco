@@ -8,7 +8,7 @@ test('StoreClient should connect and send/receive data', async (t) => {
   const mockWs = new EventEmitter();
   mockWs.readyState = 1; // OPEN
   mockWs.send = t.mock.fn((payload, cb) => {
-    const { op, id, args } = JSON.parse(payload);
+    const { op, id, args: _args } = JSON.parse(payload);
 
     // Simulate server response
     setTimeout(() => {
@@ -45,6 +45,7 @@ test('StoreClient should connect and send/receive data', async (t) => {
   assert.strictEqual(result, 'pong');
   assert.strictEqual(mockWs.send.mock.callCount(), 1);
 
-  // Cleanup
+  // Cleanup — wake the worker so it can exit cleanly
   client._active = false;
+  client._notifier?.();
 });

@@ -4,25 +4,12 @@ import v8 from 'node:v8';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
+import StoreBase from './base.js';
 
 const ACTION = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3, HAS: 4, METADATA: 5 });
 const LOCATION = Object.freeze({ MEMORY: 0, DISK: 1 });
 
-class StoreManager {
-  onDelete   = null;
-  _notifier  = null;
-  _metadata  = new Map();
-  _data      = new Map();
-  _queues    = [];
-  _active    = false;
-
-  // Rolling queue-length accumulators for avgQueueLength
-  _queueLenSum     = 0;
-  _queueLenSamples = 0;
-
-  /** @type {ReturnType<typeof this._makeStats>} */
-  _stats = this._makeStats();
-
+class StoreManager extends StoreBase {
   /**
    * @param {object} [config]
    * @param {number} [config.memoryTTL]  ms items live in memory  (default 5 min)
@@ -32,15 +19,10 @@ class StoreManager {
    * @param {object} [config.logger]     object with .info/.warn/.error/.debug methods
    */
   constructor(config = {}) {
-    const heapLimit = v8.getHeapStatistics().heap_size_limit;
+    super(config);
 
-    // Use ?? instead of || so that an explicit 0 is not silently replaced by default.
-    // _validateInt returns null for invalid input, triggering the ?? fallback.
-    this.memoryTTL = this._validateInt(config.memoryTTL) ?? 300_000;
-    this.diskTTL   = this._validateInt(config.diskTTL)   ?? 1_200_000;
-    this.diskPath  = config.diskPath || join(process.cwd(), 'storage', 'db');
-    this.maxMemory = this._validateInt(config.maxMemory) ?? Math.floor(heapLimit * 0.3);
-    this.logger    = config.logger?.createLogger?.('DATABASE');
+    this.diskTTL = this._validateInt(config.diskTTL) ?? 1_200_000;
+    this.diskPath = config.diskPath || join(process.cwd(), 'storage', 'db');
   }
 
   async ready() {
@@ -60,7 +42,7 @@ class StoreManager {
       // Cap at heap limit rather than Infinity to avoid unbounded growth.
       this.maxMemory = v8.getHeapStatistics().heap_size_limit;
       this.memoryTTL = this.diskTTL;
-      this.diskPath  = null;
+      this.diskPath = null;
     }
   }
 
@@ -78,7 +60,11 @@ class StoreManager {
     // Drain remaining queued tasks before demoting
     while (this._queues.length) {
       const task = this._queues.shift();
-      try { await task(); } catch { /* already logged inside tasks */ }
+      try {
+        await task();
+      } catch {
+        /* already logged inside tasks */
+      }
     }
 
     await this._demoteAll();
@@ -132,11 +118,12 @@ class StoreManager {
     return this._addAction(ACTION.METADATA, key);
   }
 
+  // --- Stats (engine-specific: uses itemsOnDisk) ---
+
   async getStats() {
-    // Count memory / disk items without allocating intermediate arrays
     let itemsInMemory = 0;
-    let itemsOnDisk   = 0;
-    let dataBytes     = 0;
+    let itemsOnDisk = 0;
+    let dataBytes = 0;
     for (const m of this._metadata.values()) {
       if (m.location === LOCATION.MEMORY) {
         itemsInMemory++;
@@ -146,51 +133,46 @@ class StoreManager {
       }
     }
 
-    // Metadata size is expensive to compute — only do it in getStats, not hot paths.
-    const metaBytes  = this._metadata.size > 0 ? serialize(this._metadata).length : 0;
+    const metaBytes = this._metadata.size > 0 ? serialize(this._metadata).length : 0;
     const totalBytes = dataBytes + metaBytes;
 
     const totalCacheOps = this._stats.cache.hits + this._stats.cache.misses;
-    const hitRate = totalCacheOps > 0
-      ? (this._stats.cache.hits / totalCacheOps * 100).toFixed(2)
-      : '0.00';
+    const hitRate = totalCacheOps > 0 ? ((this._stats.cache.hits / totalCacheOps) * 100).toFixed(2) : '0.00';
 
     const uptime = Date.now() - this._stats.lifecycle.startTime;
 
     return {
-      uptime:    this._formatDuration(uptime),
-      uptimeMs:  uptime,
+      uptime: this._formatDuration(uptime),
+      uptimeMs: uptime,
       operations: {
         ...this._stats.operations,
         total: Object.values(this._stats.operations).reduce((a, b) => a + b, 0),
       },
       cache: {
         ...this._stats.cache,
-        hitRate:        `${hitRate}%`,
+        hitRate: `${hitRate}%`,
         hitRateNumeric: parseFloat(hitRate),
       },
       storage: {
-        totalItems:    this._metadata.size,
+        totalItems: this._metadata.size,
         itemsInMemory,
         itemsOnDisk,
         memoryUsage: {
           metadata: this._formatBytes(metaBytes),
-          data:     this._formatBytes(dataBytes),
-          total:    this._formatBytes(totalBytes),
+          data: this._formatBytes(dataBytes),
+          total: this._formatBytes(totalBytes),
         },
-        memoryUsageBytes:   { metadata: metaBytes, data: dataBytes, total: totalBytes },
-        maxMemory:          this._formatBytes(this.maxMemory),
-        memoryUtilization:  `${((totalBytes / this.maxMemory) * 100).toFixed(2)}%`,
+        memoryUsageBytes: { metadata: metaBytes, data: dataBytes, total: totalBytes },
+        maxMemory: this._formatBytes(this.maxMemory),
+        memoryUtilization: `${((totalBytes / this.maxMemory) * 100).toFixed(2)}%`,
       },
       queue: {
         current: this._queues.length,
-        avg:     this._queueLenSamples > 0
-          ? (this._queueLenSum / this._queueLenSamples).toFixed(2)
-          : '0.00',
+        avg: this._queueLenSamples > 0 ? (this._queueLenSum / this._queueLenSamples).toFixed(2) : '0.00',
         max: this._stats.performance.maxQueueLength,
       },
       maintenance: {
-        cycles:       this._stats.performance.maintenanceCycles,
+        cycles: this._stats.performance.maintenanceCycles,
         lastDuration: `${this._stats.performance.lastMaintenanceDuration}ms`,
       },
       errors: {
@@ -200,321 +182,199 @@ class StoreManager {
     };
   }
 
-  async resetStats() {
-    this._stats          = this._makeStats();
-    this._queueLenSum    = 0;
-    this._queueLenSamples = 0;
-    this._log('info', 'stats have been reset');
-  }
+  // --- Stats factory (engine-specific error fields) ---
 
   _makeStats() {
     return {
-      operations:  { get: 0, set: 0, delete: 0, clear: 0 },
-      cache:       { hits: 0, misses: 0, promotions: 0, demotions: 0 },
-      errors:      { diskRead: 0, diskWrite: 0, serialize: 0, queue: 0 },
+      operations: { get: 0, set: 0, delete: 0, clear: 0 },
+      cache: { hits: 0, misses: 0, promotions: 0, demotions: 0 },
+      errors: { diskRead: 0, diskWrite: 0, serialize: 0, queue: 0 },
       performance: { maxQueueLength: 0, maintenanceCycles: 0, lastMaintenanceDuration: 0 },
-      lifecycle:   { startTime: Date.now() },
+      lifecycle: { startTime: Date.now() },
     };
   }
 
-  _log(level, ...args) {
-    this.logger?.[level]?.(...args);
-  }
+  // --- Task factory (engine-specific: disk I/O) ---
 
   /**
-   * Parse an integer config value.  Returns null (not undefined/NaN) so that
-   * callers can safely use the `??` nullish-coalescing operator.
-   * Rejects strings like "100px" that parseInt would happily accept.
+   * Create a task function for a given action.
+   * @param {number} action
+   * @param {string} [key]
+   * @param {*} [data]
+   * @param {*} [options]
+   * @returns {() => Promise} async function returning the result value
    */
-  _validateInt(input) {
-    if (input === null || input === undefined) return null;
-    const n = Number(input);
-    if (!Number.isInteger(n)) return null;
-    return n;
-  }
-
-  _addAction(action, key, data, options) {
-    if (!this._active) return Promise.resolve();
-
-    return new Promise((resolve) => {
-      let task;
-
-      switch (action) {
-        case ACTION.CLEAR:
-          task = async () => {
-            if (this.onDelete) {
-              for (const [k, m] of this._metadata.entries()) {
-                try { await this.onDelete(k, m); } catch { /* ignore */ }
+  _createTask(action, key, data, options) {
+    switch (action) {
+      case ACTION.CLEAR:
+        return async () => {
+          if (this.onDelete) {
+            for (const [k, m] of this._metadata.entries()) {
+              try {
+                await this.onDelete(k, m);
+              } catch {
+                /* ignore */
               }
             }
-            this._metadata.clear();
-            this._data.clear();
-            if (this.diskPath) {
-              await fs.rm(this.diskPath, { force: true, recursive: true });
-              await fs.mkdir(this.diskPath, { recursive: true });
-            }
-            resolve();
+          }
+          this._metadata.clear();
+          this._data.clear();
+          if (this.diskPath) {
+            await fs.rm(this.diskPath, { force: true, recursive: true });
+            await fs.mkdir(this.diskPath, { recursive: true });
+          }
+        };
+
+      case ACTION.SET:
+        return async () => {
+          const isCache = typeof options === 'boolean' ? options : !!options?.isCache;
+          const customTTL = typeof options === 'object' ? options?.ttl : null;
+
+          const existing = this._metadata.get(key);
+          const meta = existing ?? {
+            created: Date.now(),
+            isCache: !!isCache,
+            lastAccess: Date.now(),
+            accessCount: 0,
+            location: LOCATION.MEMORY,
+            locationFile: null,
+            dataSizeV8: 0,
+            expired: customTTL ? Date.now() + customTTL : Date.now() + this.memoryTTL,
           };
-          break;
 
-        case ACTION.SET:
-          task = async () => {
-            const isCache = typeof options === 'boolean' ? options : !!options?.isCache;
-            const customTTL = typeof options === 'object' ? options?.ttl : null;
+          meta.accessCount = 0;
+          if (customTTL !== null) {
+            meta.customTTL = customTTL;
+            meta.expired = Date.now() + customTTL;
+          }
 
-            const existing = this._metadata.get(key);
-            const meta = existing ?? {
-              created:      Date.now(),
-              isCache:      !!isCache,
-              lastAccess:   Date.now(),
-              accessCount:  0,
-              location:     LOCATION.MEMORY,
-              locationFile: null,
-              dataSizeV8:   0,
-              expired:      customTTL ? (Date.now() + customTTL) : (Date.now() + this.memoryTTL),
-            };
-
-            meta.accessCount = 0;
-            if (customTTL !== null) {
-              meta.customTTL = customTTL;
-              meta.expired = Date.now() + customTTL;
-            }
-
-            // Remove stale disk file if key was previously demoted
-            if (meta.location === LOCATION.DISK) {
-              try { await fs.rm(meta.locationFile); } catch { /* file may already be gone */ }
-              meta.location = LOCATION.MEMORY;
-            }
-
+          // Remove stale disk file if key was previously demoted
+          if (meta.location === LOCATION.DISK) {
             try {
-              meta.dataSizeV8 = serialize(data).length;
-            } catch (err) {
-              this._stats.errors.serialize++;
-              this._log('error', 'serialize failed for key', key, err);
-              // Data that cannot be serialized cannot be demoted to disk.
-              // Refuse to store it so the caller is not silently misled.
-              resolve();
-              return;
+              await fs.rm(meta.locationFile);
+            } catch {
+              /* file may already be gone */
+            }
+            meta.location = LOCATION.MEMORY;
+          }
+
+          try {
+            meta.dataSizeV8 = serialize(data).length;
+          } catch (err) {
+            this._stats.errors.serialize++;
+            this._log('error', 'serialize failed for key', key, err);
+            return;
+          }
+
+          meta.lastAccess = Date.now();
+          if (customTTL === null) {
+            meta.expired = Date.now() + this.memoryTTL;
+          }
+          this._data.set(key, data);
+          this._metadata.set(key, meta);
+        };
+
+      case ACTION.GET:
+        return async () => {
+          if (!this._metadata.has(key)) {
+            this._stats.cache.misses++;
+            return;
+          }
+
+          const meta = this._metadata.get(key);
+
+          // Check TTL before refreshing or promoting
+          if (Date.now() > meta.expired) {
+            this._stats.cache.misses++;
+            await this._delete(key);
+            return;
+          }
+
+          meta.accessCount++;
+          meta.lastAccess = Date.now();
+
+          if (meta.location === LOCATION.DISK) {
+            if (!fsSync.existsSync(meta.locationFile)) {
+              const suff = meta.locationFile.includes('/')
+                ? meta.locationFile.split('/').slice(-2).join('/')
+                : meta.locationFile.split('\\').slice(-2).join('\\');
+              const newPath = join(this.diskPath, suff);
+              if (fsSync.existsSync(newPath)) {
+                meta.locationFile = newPath;
+              }
             }
 
-            meta.lastAccess = Date.now();
-            if (customTTL === null) {
-              meta.expired = Date.now() + this.memoryTTL;
-            }
-            this._data.set(key, data);
-            this._metadata.set(key, meta);
-            resolve();
-          };
-          break;
-
-        case ACTION.GET:
-          task = async () => {
-            if (!this._metadata.has(key)) {
-              this._stats.cache.misses++;
-              resolve();
-              return;
-            }
-
-            const meta = this._metadata.get(key);
-
-            // Check TTL before refreshing or promoting
+            // Check TTL before paying the I/O cost of promotion
             if (Date.now() > meta.expired) {
               this._stats.cache.misses++;
               await this._delete(key);
-              resolve();
               return;
             }
 
-            meta.accessCount++;
-            meta.lastAccess = Date.now();
-
-            if (meta.location === LOCATION.DISK) {
-              if (!fsSync.existsSync(meta.locationFile)) {
-                const suff = meta.locationFile.includes('/') ? meta.locationFile.split('/').slice(-2).join('/') : meta.locationFile.split('\\').slice(-2).join('\\');
-                const newPath = join(this.diskPath, suff);
-                if (fsSync.existsSync(newPath)) {
-                  meta.locationFile = newPath;
-                }
-              }
-
-              // Check TTL before paying the I/O cost of promotion
-              if (Date.now() > meta.expired) {
-                this._stats.cache.misses++;
-                await this._delete(key);
-                resolve();
-                return;
-              }
-
-              this._stats.cache.promotions++;
-              this._log('debug', 'promoting from disk:', key);
-              try {
-                const raw = await fs.readFile(meta.locationFile);
-                const value = deserialize(raw);
-                meta.location = LOCATION.MEMORY;
-                meta.expired  = meta.customTTL ? (Date.now() + meta.customTTL) : (Date.now() + this.memoryTTL);
-                this._data.set(key, value);
-                this._metadata.set(key, meta);
-                await fs.rm(meta.locationFile).catch(() => {});
-                this._stats.cache.hits++;
-                resolve(value);
-              } catch (err) {
-                this._stats.errors.diskRead++;
-                this._stats.cache.misses++;
-                this._log('error', 'disk read error for key', key, err);
-                resolve();
-              }
+            this._stats.cache.promotions++;
+            this._log('debug', 'promoting from disk:', key);
+            try {
+              const raw = await fs.readFile(meta.locationFile);
+              const value = deserialize(raw);
+              meta.location = LOCATION.MEMORY;
+              meta.expired = meta.customTTL ? Date.now() + meta.customTTL : Date.now() + this.memoryTTL;
+              this._data.set(key, value);
+              this._metadata.set(key, meta);
+              await fs
+                .rm(meta.locationFile)
+                .catch((err) =>
+                  this._log('debug', 'cleanup: failed to remove disk file', meta.locationFile, err?.message),
+                );
+              this._stats.cache.hits++;
+              return value;
+            } catch (err) {
+              this._stats.errors.diskRead++;
+              this._stats.cache.misses++;
+              this._log('error', 'disk read error for key', key, err);
               return;
             }
+          }
 
-            // Memory hit — refresh sliding TTL
-            meta.expired = meta.customTTL ? (Date.now() + meta.customTTL) : (Date.now() + this.memoryTTL);
-            this._metadata.set(key, meta);
-            this._stats.cache.hits++;
-            resolve(this._data.get(key));
-          };
-          break;
+          // Memory hit — refresh sliding TTL
+          meta.expired = meta.customTTL ? Date.now() + meta.customTTL : Date.now() + this.memoryTTL;
+          this._metadata.set(key, meta);
+          this._stats.cache.hits++;
+          return this._data.get(key);
+        };
 
-        case ACTION.DELETE:
-          task = async () => {
-            await this._delete(key);
-            resolve();
-          };
-          break;
-        case ACTION.HAS:
-          task = async () => {
-            resolve(this._metadata.has(key));
-          };
-          break;
-        case ACTION.METADATA:
-          task = async () => {
-            const res = Object.assign({}, this._metadata.get(key) || {});
-            resolve(res);
-          };
-          break;
-      }
+      case ACTION.DELETE:
+        return async () => {
+          await this._delete(key);
+        };
 
-      this._queues.push(task);
+      case ACTION.HAS:
+        return async () => {
+          return this._metadata.has(key);
+        };
 
-      // Track queue length stats
-      const len = this._queues.length;
-      this._queueLenSum += len;
-      this._queueLenSamples++;
-      if (len > this._stats.performance.maxQueueLength) {
-        this._stats.performance.maxQueueLength = len;
-      }
+      case ACTION.METADATA:
+        return async () => {
+          return Object.assign({}, this._metadata.get(key) || {});
+        };
 
-      this._notifier?.();
-    });
-  }
-
-  async _startQueueWorker() {
-    while (this._active) {
-      // Process all pending tasks
-      while (this._queues.length && this._active) {
-        const task = this._queues.shift();
-        try {
-          await task();
-        } catch (err) {
-          this._stats.errors.queue++;
-          this._log('error', 'queue task failed', err);
-        }
-      }
-
-      if (!this._active) break;
-
-      // Wait for new tasks
-      await new Promise((resolve) => {
-        this._notifier = resolve;
-        // Check again in case a task was added after the loop but before setting notifier
-        if (this._queues.length > 0) resolve();
-      });
-      this._notifier = null;
+      default:
+        throw new Error(`Unknown action: ${action}`);
     }
   }
 
-  async _startMaintainer() {
-    while (this._active) {
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
-      if (!this._active) break;
+  // --- Backend-specific delete ---
 
-      let cycle        = 0;
-      let cachedMetaLen = 0;
-      let isFirst      = true;
-
-      const maintenanceTask = async () => {
-        const startTime = Date.now();
-
-        // Recompute exact metadata size every 5 cycles; use cached value otherwise.
-        if (++cycle > 5 || isFirst) {
-          cachedMetaLen = serialize(this._metadata).length;
-          cycle   = 0;
-          isFirst = false;
-        }
-
-        let memTotal = cachedMetaLen;
-
-        for (const [key] of this._metadata) {
-          // Map is safe to iterate while deleting from it in JS; the guard below
-          // handles keys that were deleted by a concurrent task.
-          if (!this._metadata.has(key)) continue;
-          const m = this._metadata.get(key);
-
-          if (Date.now() > m.expired) {
-            if (m.location === LOCATION.MEMORY) {
-              await this._demote(key);
-            } else {
-              await this._delete(key);
-            }
-            continue;
-          }
-
-          if (m.location === LOCATION.MEMORY && m.dataSizeV8 > 0) {
-            memTotal += m.dataSizeV8;
-          }
-        }
-
-        if (memTotal > this.maxMemory) {
-          // Evict the 20% least-recently-accessed in-memory items.
-          // Using lastAccess gives proper LRU semantics instead of raw accessCount.
-          const candidates = Array.from(this._metadata.entries())
-            .filter(([, m]) => m.location === LOCATION.MEMORY && m.dataSizeV8 > 0)
-            .sort(([, a], [, b]) => a.lastAccess - b.lastAccess)
-            .slice(0, Math.ceil(this._metadata.size * 0.2));
-
-          for (const [key] of candidates) {
-            await this._demote(key);
-          }
-        }
-
-        this._stats.performance.maintenanceCycles++;
-        this._stats.performance.lastMaintenanceDuration = Date.now() - startTime;
-      };
-
-      this._queues.push(maintenanceTask);
-      this._notifier?.();
-    }
-  }
-
-  async _delete(key) {
-    const meta = this._metadata.get(key);
-    if (!meta) return;
-
-    if (this.onDelete) {
-      try {
-        await this.onDelete(key, meta);
-      } catch (err) {
-        this._log('error', 'onDelete hook failed for key', key, err);
-      }
-    }
-
+  async _deleteFromBackend(_key, meta) {
     if (meta.location === LOCATION.DISK && meta.locationFile) {
-      try { await fs.rm(meta.locationFile); } catch { /* already gone */ }
+      try {
+        await fs.rm(meta.locationFile);
+      } catch {
+        /* already gone */
+      }
     }
-
-    this._metadata.delete(key);
-    this._data.delete(key);
-    this._log('debug', 'deleted key:', key);
   }
+
+  // --- Demote (memory → disk) ---
 
   async _demote(key) {
     const meta = this._metadata.get(key);
@@ -528,14 +388,14 @@ class StoreManager {
       await fs.writeFile(meta.locationFile, raw);
 
       meta.location = LOCATION.DISK;
-      meta.expired  = meta.isCache ? Date.now() + this.diskTTL : Infinity;
+      meta.expired = meta.isCache ? Date.now() + this.diskTTL : Infinity;
       this._data.delete(key);
       this._metadata.set(key, meta);
       this._stats.cache.demotions++;
       this._log('debug', 'demoted to disk:', key);
     } catch (err) {
       meta.location = LOCATION.MEMORY;
-      meta.expired  = Date.now() + this.memoryTTL;
+      meta.expired = Date.now() + this.memoryTTL;
       this._metadata.set(key, meta);
       this._stats.errors.diskWrite++;
       this._log('error', 'failed to demote key', key, err);
@@ -551,6 +411,8 @@ class StoreManager {
       }
     }
   }
+
+  // --- Disk metadata persistence ---
 
   async _loadMetadataFromDisk() {
     const metadataPath = join(this.diskPath, 'metadata.dat');
@@ -585,26 +447,6 @@ class StoreManager {
   _getLocation(key) {
     const hash = createHash('sha1').update(key).digest('hex');
     return join(this.diskPath, hash.slice(0, 2), hash.slice(2) + '.dat');
-  }
-
-  _formatBytes(bytes) {
-    if (bytes === 0)        return '0 B';
-    if (bytes === Infinity) return '∞';
-    const k     = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i     = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-  }
-
-  _formatDuration(ms) {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours   = Math.floor(minutes / 60);
-    const days    = Math.floor(hours / 24);
-    if (days    > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
-    if (hours   > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-    return `${seconds}s`;
   }
 }
 

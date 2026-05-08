@@ -1,11 +1,11 @@
 const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
 
-const execute = async(client, message, args) => {
+const execute = async (client, message, args) => {
   const messagesToDelete = [];
   let deleted = 0;
 
   if (message.message_reference) {
-    let messages = [];
+    let messages;
     let after = message.message_reference.message_id;
 
     do {
@@ -15,12 +15,24 @@ const execute = async(client, message, args) => {
     } while (messages.length === 100 && after);
 
     messagesToDelete.push({ id: message.message_reference.message_id });
-
   } else {
     const count = Number(args[0]);
-    if (isNaN(count) || count < 1) return client.deleteMessage(message.channel_id, message.id);
+    if (isNaN(count) || count < 1 || !Number.isInteger(count)) {
+      return client.reply(
+        message,
+        'Please provide a valid positive number of messages to purge. Usage: `.purge <count>`',
+      );
+    }
 
-    let remain = count;
+    const MAX_PURGE = 1000;
+    const adjustedCount = Math.min(count, MAX_PURGE);
+    if (count > MAX_PURGE) {
+      client
+        .reply(message, `⚠️ Purge limited to **${MAX_PURGE}** messages at a time. Proceeding with ${MAX_PURGE}.`)
+        .catch((err) => client.logger?.warn?.('Failed to send purge limit notice:', err));
+    }
+
+    let remain = adjustedCount;
     let before = message.id;
     while (remain > 0) {
       const messages = await client.getMessages(message.channel_id, { before, limit: Math.min(remain, 100) });
@@ -40,7 +52,10 @@ const execute = async(client, message, args) => {
   for (let i = 0; i < messagesToDelete.length; i += 100) {
     const chunk = messagesToDelete.slice(i, i + 100);
     if (chunk.length > 1) {
-      await client.bulkDeleteMessages(message.channel_id, chunk.map(x => x.id));
+      await client.bulkDeleteMessages(
+        message.channel_id,
+        chunk.map((x) => x.id),
+      );
     } else {
       await client.deleteMessage(message.channel_id, chunk[0].id);
     }
@@ -50,15 +65,22 @@ const execute = async(client, message, args) => {
 
   if (deleted > 0) {
     const content = `🧹 Deleted **${deleted - 1}** messages.`;
-    const reply = message.isInteraction ? await client.reply(msg, content) : await client.sendMessage(message.channel_id, content);
-    if (reply?.channel_id && reply?.id) setTimeout(() => client.deleteMessage(message.channel_id, reply.id).catch(_ => _), 3_500);
+    const reply = await client.reply(message, content);
+    if (reply?.channel_id && reply?.id)
+      setTimeout(
+        () =>
+          client
+            .deleteMessage(message.channel_id, reply.id)
+            .catch((err) => client.logger?.warn?.('Failed to auto-delete purge feedback:', err)),
+        3_500,
+      );
   }
 };
 
 const filter = (messages) => {
   const twoWeeksAgo = Date.now() - twoWeeksMs;
   return messages.filter((m) => {
-    const timestamp   = new Date(m.timestamp).getTime();
+    const timestamp = new Date(m.timestamp).getTime();
     return timestamp >= twoWeeksAgo;
   });
 };
@@ -76,9 +98,9 @@ export default {
         name: 'count',
         description: 'Number of messages to delete',
         type: 4, // INTEGER type
-        required: false
-      }
-    ]
+        required: false,
+      },
+    ],
   },
-  execute
+  execute,
 };

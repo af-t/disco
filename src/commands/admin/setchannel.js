@@ -4,8 +4,8 @@ const execute = async (client, message, args) => {
   const type = args[0]?.toLowerCase();
   const channelMention = args[1];
 
-  if (!['welcome', 'leave'].includes(type)) {
-    return client.reply(message, 'Please specify a type: `welcome` or `leave`.');
+  if (!['welcome', 'leave', 'log'].includes(type)) {
+    return client.reply(message, 'Please specify a type: `welcome`, `leave`, or `log`.');
   }
 
   let channelId = channelMention?.match(/<#(\d+)>/)?.[1];
@@ -18,7 +18,7 @@ const execute = async (client, message, args) => {
   try {
     // Verify channel exists and is in this guild
     const channels = await client.getChannels(message.guild_id);
-    const targetChannel = channels.find(c => c.id === channelId);
+    const targetChannel = channels.find((c) => c.id === channelId);
 
     if (!targetChannel) {
       return client.reply(message, 'Invalid channel or channel not in this server.');
@@ -36,7 +36,8 @@ export default {
   execute,
   data: {
     name: 'setchannel',
-    description: 'Configure channels for welcome or leave messages.',
+    description: 'Configure channels for welcome, leave, or moderation log messages.',
+    slash: true,
     usage: 'setchannel {welcome|leave} {#channel}',
     permissions: ['MANAGE_GUILD'],
     options: [
@@ -47,15 +48,16 @@ export default {
         required: true,
         choices: [
           { name: 'Welcome', value: 'welcome' },
-          { name: 'Leave', value: 'leave' }
-        ]
+          { name: 'Leave', value: 'leave' },
+          { name: 'Log', value: 'log' },
+        ],
       },
       {
         name: 'channel',
         description: 'The channel to use',
         type: 7, // CHANNEL
-        required: true
-      }
-    ]
-  }
+        required: true,
+      },
+    ],
+  },
 };

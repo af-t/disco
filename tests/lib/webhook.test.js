@@ -24,13 +24,13 @@ test('DiscordWebhookTools.sendMessage should call https.request', async (t) => {
       headers: { 'x-ratelimit-remaining': '29' },
       on: (event, handler) => {
         if (event === 'end') setTimeout(handler, 0);
-      }
+      },
     };
     callback(mockRes);
     return {
       on: () => {},
       write: () => {},
-      end: () => {}
+      end: () => {},
     };
   });
 
@@ -48,7 +48,9 @@ test('DiscordWebhookTools.deleteMessage should call https.request with DELETE', 
     const mockRes = {
       statusCode: 204,
       headers: {},
-      on: (event, handler) => { if (event === 'end') setTimeout(handler, 0); }
+      on: (event, handler) => {
+        if (event === 'end') setTimeout(handler, 0);
+      },
     };
     callback(mockRes);
     return { on: () => {}, write: () => {}, end: () => {} };
@@ -68,7 +70,9 @@ test('DiscordWebhookTools.editMessage should call https.request with PATCH', asy
     const mockRes = {
       statusCode: 200,
       headers: {},
-      on: (event, handler) => { if (event === 'end') setTimeout(handler, 0); }
+      on: (event, handler) => {
+        if (event === 'end') setTimeout(handler, 0);
+      },
     };
     callback(mockRes);
     return { on: () => {}, write: () => {}, end: () => {} };
@@ -93,4 +97,26 @@ test('DiscordWebhookTools signature generation and verification', () => {
 
   const isInvalid = tools.verifySignature('f'.repeat(signature.length), timestamp, body, secret);
   assert.strictEqual(isInvalid, false);
+});
+
+test('verifySignature should return false for mismatched-length signature (fix M8)', () => {
+  const tools = new DiscordWebhookTools('https://discord.com/api/webhooks/123/abc');
+  const secret = 'secret-key';
+  const timestamp = '1234567890';
+  const body = { id: 'abc' };
+
+  const validSig = tools.generateSignature(timestamp, body, secret);
+  // Truncate the signature to create a length mismatch
+  const shortSig = validSig.slice(0, 10);
+
+  assert.strictEqual(
+    tools.verifySignature(shortSig, timestamp, body, secret),
+    false,
+    'Short signature should fail length guard',
+  );
+  assert.strictEqual(
+    tools.verifySignature(shortSig + 'extra', timestamp, body, secret),
+    false,
+    'Longer signature should fail length guard',
+  );
 });

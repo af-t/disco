@@ -11,13 +11,10 @@ class DiscordWebhookTools {
 
   static #urlCache = new Map();
 
-  #webhookUrl;
   #urlObject;
-  #lastRequestTime = 0;
   #remainingRequests = 30; // Discord's default rate limit
   #resetTime = 0;
   #boundary = Math.random().toString(16).slice(2);
-
 
   /**
    * Creates a new DiscordWebhookTools instance.
@@ -36,7 +33,6 @@ class DiscordWebhookTools {
   #validateAndSetWebhookUrl(webhookUrl) {
     const cached = DiscordWebhookTools.#urlCache.get(webhookUrl);
     if (cached) {
-      this.#webhookUrl = webhookUrl;
       this.#urlObject = cached;
       return;
     }
@@ -49,7 +45,6 @@ class DiscordWebhookTools {
     const urlObject = new URL(webhookUrl);
     DiscordWebhookTools.#urlCache.set(webhookUrl, urlObject);
 
-    this.#webhookUrl = webhookUrl;
     this.#urlObject = urlObject;
   }
 
@@ -63,12 +58,12 @@ class DiscordWebhookTools {
 
     if (now < this.#resetTime) {
       const delay = this.#resetTime - now;
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
     if (this.#remainingRequests <= 0) {
       const delay = Math.max(0, this.#resetTime - now);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 
@@ -85,8 +80,8 @@ class DiscordWebhookTools {
   #buildFormDataHeader(name, filename) {
     const form = [
       `--${this.#boundary}`,
-      `Content-Disposition: form-data${name ? ('; name="' + name + '"') : ''}${filename ? ('; filename="' + filename + '"') : ''}`,
-      ''
+      `Content-Disposition: form-data${name ? '; name="' + name + '"' : ''}${filename ? '; filename="' + filename + '"' : ''}`,
+      '',
     ];
     return form.join('\r\n') + '\r\n';
   }
@@ -102,7 +97,8 @@ class DiscordWebhookTools {
   async sendRawRequest(data, options = {}, retryCount = 0) {
     await this.#handleRateLimit();
 
-    return new Promise((resolve, reject) => { // ... (rest of the sendRawRequest function remains unchanged)
+    return new Promise((resolve, reject) => {
+      // ... (rest of the sendRawRequest function remains unchanged)
       let responseSize = 0;
       const requestOptions = {
         hostname: this.#urlObject.hostname,
@@ -110,9 +106,9 @@ class DiscordWebhookTools {
         method: options.method || 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...options.headers
+          ...options.headers,
         },
-        timeout: DiscordWebhookTools.REQUEST_TIMEOUT
+        timeout: DiscordWebhookTools.REQUEST_TIMEOUT,
       };
 
       const req = https.request(requestOptions, (res) => {
@@ -135,7 +131,7 @@ class DiscordWebhookTools {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             try {
               resolve(responseData ? JSON.parse(responseData) : {});
-            } catch (e) {
+            } catch (_e) {
               resolve(responseData);
             }
           } else if (res.statusCode === 429 && retryCount < DiscordWebhookTools.MAX_RETRIES) {
@@ -199,30 +195,35 @@ class DiscordWebhookTools {
     if (files.length < 1) throw Error('must include at least 1 file to upload');
 
     const results = [];
-    const payload = { content: '', ...((options instanceof Object) ? options : {}) };
+    const payload = { content: '', ...(options instanceof Object ? options : {}) };
 
+    // eslint-disable-next-line no-async-promise-executor
     await new Promise(async (resolve, reject) => {
-      const req = https.request({
-        hostname: this.#urlObject.hostname,
-        path: this.#urlObject.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${this.#boundary}`
+      const req = https.request(
+        {
+          hostname: this.#urlObject.hostname,
+          path: this.#urlObject.pathname,
+          method: 'POST',
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${this.#boundary}`,
+          },
+          timeout: DiscordWebhookTools.REQUEST_TIMEOUT,
         },
-        timeout: DiscordWebhookTools.REQUEST_TIMEOUT
-      }, (res) => {
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          const data = Buffer.concat([chunks]);
-          try {// Determine data type
-            results.push(JSON.parse(data));
-          } catch {
-            results.push(data.toString());
-          }
-          resolve();
-        });
-      });
+        (res) => {
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const data = Buffer.concat([chunks]);
+            try {
+              // Determine data type
+              results.push(JSON.parse(data));
+            } catch {
+              results.push(data.toString());
+            }
+            resolve();
+          });
+        },
+      );
 
       req.on('timeout', () => {
         req.destroy();
@@ -276,7 +277,7 @@ class DiscordWebhookTools {
   async deleteMessage(messageId) {
     return this.sendRawRequest(null, {
       method: 'DELETE',
-      path: `${this.#urlObject.pathname}/messages/${messageId}`
+      path: `${this.#urlObject.pathname}/messages/${messageId}`,
     });
   }
 
@@ -289,7 +290,7 @@ class DiscordWebhookTools {
   async editMessage(messageId, data) {
     return this.sendRawRequest(data, {
       method: 'PATCH',
-      path: `${this.#urlObject.pathname}/messages/${messageId}`
+      path: `${this.#urlObject.pathname}/messages/${messageId}`,
     });
   }
 
@@ -307,7 +308,7 @@ class DiscordWebhookTools {
       .update(timestamp + bodyString)
       .digest('hex');
   }
-   /**
+  /**
    * Verifies a signature against the generated signature.
    * @param {string} signature The signature to verify.
    * @param {string} timestamp The timestamp of the interaction.
@@ -317,7 +318,11 @@ class DiscordWebhookTools {
    */
   verifySignature(signature, timestamp, body, secretKey) {
     const expectedSignature = this.generateSignature(timestamp, body, secretKey);
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+    const sigBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSignature);
+    // Guard against mismatched-length buffers (fixes M8)
+    if (sigBuf.length !== expectedBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, expectedBuf);
   }
 }
 

@@ -15,20 +15,27 @@ const execute = async (client, message, args) => {
     if (uid && uid.length > 15) uids.add(uid);
   }
 
-  if (uids.size < 1 && message.message_reference) try {
-    const mref = await client.getMessage(message.message_reference.channel_id, message.message_reference.message_id);
-    uids.add(mref.author.id);
-  } catch (error) {
-    // message doesn't exist or has been deleted
-    client.logger.warn(error);
-  }
+  if (uids.size < 1 && message.message_reference)
+    try {
+      const mref = await client.getMessage(message.message_reference.channel_id, message.message_reference.message_id);
+      uids.add(mref.author.id);
+    } catch (error) {
+      // message doesn't exist or has been deleted
+      client.logger.warn(error);
+    }
 
   if (uids.size < 1) uids.add(message.author.id);
 
-  for (const uid of uids) {// Prosess ids to embeds
-    let avatar, nick, title = titles[0];
+  for (const uid of uids) {
+    // Prosess ids to embeds
+    let avatar,
+      nick,
+      title = titles[0];
     try {
-      const meta = (message.member && uid === message.author.id) ? message.member : await client.getGuildMember(message.guild_id, uid);
+      const meta =
+        message.member && uid === message.author.id
+          ? message.member
+          : await client.getGuildMember(message.guild_id, uid);
       avatar = meta.avatar || meta.user.avatar;
       nick = meta.nick || meta.user.username;
 
@@ -47,20 +54,22 @@ const execute = async (client, message, args) => {
     embeds.push({
       author: {
         name: nick,
-        icon_url: getCdnUrl(uid, avatar)
+        icon_url: getCdnUrl(uid, avatar),
       },
       image: {
         width: 1024,
         height: 1024,
-        url: getCdnUrl(uid, avatar) + '.png?size=4096'
+        url: getCdnUrl(uid, avatar) + '.png?size=4096',
       },
       title,
-      type: 'rich'
+      type: 'rich',
     });
   }
 
   // Send results
-  client.reply(message, null, false, { embeds }).catch(client.logger.warn);
+  client
+    .reply(message, null, false, { embeds })
+    .catch((err) => client.logger?.warn?.('Failed to send avatar response:', err));
 };
 
 export default {
@@ -76,8 +85,8 @@ export default {
         name: 'user',
         description: 'The user to get the avatar of',
         type: 6, // USER type
-        required: false
-      }
-    ]
-  }
-}
+        required: false,
+      },
+    ],
+  },
+};

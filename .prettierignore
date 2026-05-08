@@ -1,0 +1,9 @@
+node_modules/
+.git/
+workspaces/
+coverage/
+package-lock.json
+*.md
+LICENSE
+.env
+.env.example

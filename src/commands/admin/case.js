@@ -25,9 +25,7 @@ const execute = async (client, message, args) => {
     }
 
     const status = caseData.resolved ? '✅ Resolved' : '⏳ Active';
-    const duration = caseData.duration
-      ? `\n**Duration:** ${Math.floor(caseData.duration / 1000)}s`
-      : '';
+    const duration = caseData.duration ? `\n**Duration:** ${Math.floor(caseData.duration / 1000)}s` : '';
 
     const embed = {
       title: `Case #${caseData.id} — ${caseData.type.toUpperCase()}`,
@@ -37,15 +35,15 @@ const execute = async (client, message, args) => {
         { name: 'Moderator', value: `<@${caseData.moderator_id}>`, inline: true },
         { name: 'User', value: `<@${caseData.user_id}>`, inline: true },
         { name: 'Reason', value: caseData.reason + duration },
-        { name: 'Created', value: `<t:${Math.floor(caseData.created_at / 1000)}:F>` }
+        { name: 'Created', value: `<t:${Math.floor(caseData.created_at / 1000)}:F>` },
       ],
-      footer: { text: `Case #${caseData.id}` }
+      footer: { text: `Case #${caseData.id}` },
     };
 
     if (caseData.resolved_at) {
       embed.fields.push({
         name: 'Resolved',
-        value: `<t:${Math.floor(caseData.resolved_at / 1000)}:F>`
+        value: `<t:${Math.floor(caseData.resolved_at / 1000)}:F>`,
       });
     }
 
@@ -90,7 +88,7 @@ const execute = async (client, message, args) => {
       return;
     }
 
-    const lines = cases.map(c => {
+    const lines = cases.map((c) => {
       const icon = c.resolved ? '✅' : '⏳';
       const dur = c.duration ? ` (${Math.floor(c.duration / 60000)}m)` : '';
       return `${icon} **#${c.id}** ${c.type}${dur} → <@${c.user_id}> — _${c.reason.slice(0, 60)}${c.reason.length > 60 ? '...' : ''}_`;
@@ -100,7 +98,7 @@ const execute = async (client, message, args) => {
       title: `Moderation Cases (${cases.length})`,
       description: lines.join('\n'),
       color: 0x3498db,
-      footer: { text: `Guild: ${guildId}` }
+      footer: { text: `Guild: ${guildId}` },
     };
 
     await client.reply(message, '', false, { embeds: [embed], allowed_mentions: {} });
@@ -109,16 +107,18 @@ const execute = async (client, message, args) => {
 
   // Default: show usage
   await client.reply(message, '', false, {
-    embeds: [{
-      title: 'Case Management',
-      description: [
-        '`.case view <number>` — View case details',
-        '`.case edit <number> <reason>` — Edit case reason',
-        '`.case list [user]` — List recent cases'
-      ].join('\n'),
-      color: 0x3498db
-    }],
-    allowed_mentions: {}
+    embeds: [
+      {
+        title: 'Case Management',
+        description: [
+          '`.case view <number>` — View case details',
+          '`.case edit <number> <reason>` — Edit case reason',
+          '`.case list [user]` — List recent cases',
+        ].join('\n'),
+        color: 0x3498db,
+      },
+    ],
+    allowed_mentions: {},
   });
 };
 
@@ -135,9 +135,7 @@ export default {
         name: 'view',
         description: 'View a case by number',
         type: 1,
-        options: [
-          { name: 'number', description: 'Case number', type: 4, required: true }
-        ]
+        options: [{ name: 'number', description: 'Case number', type: 4, required: true }],
       },
       {
         name: 'edit',
@@ -145,17 +143,15 @@ export default {
         type: 1,
         options: [
           { name: 'number', description: 'Case number', type: 4, required: true },
-          { name: 'reason', description: 'New reason', type: 3, required: true }
-        ]
+          { name: 'reason', description: 'New reason', type: 3, required: true },
+        ],
       },
       {
         name: 'list',
         description: 'List cases (optionally filter by user)',
         type: 1,
-        options: [
-          { name: 'user', description: 'Filter by user', type: 6, required: false }
-        ]
-      }
-    ]
-  }
+        options: [{ name: 'user', description: 'Filter by user', type: 6, required: false }],
+      },
+    ],
+  },
 };

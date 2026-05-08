@@ -12,16 +12,25 @@ const execute = async (client, message) => {
       fields: [
         { name: '🆔 Server ID', value: guild.id, inline: true },
         { name: '👑 Owner ID', value: guild.owner_id, inline: true },
-        { name: '📅 Created At', value: `<t:${Math.floor(Number((BigInt(guild.id) >> 22n) + 1420070400000n) / 1000)}:R>`, inline: true },
+        {
+          name: '📅 Created At',
+          value: `<t:${Math.floor(Number((BigInt(guild.id) >> 22n) + 1420070400000n) / 1000)}:R>`,
+          inline: true,
+        },
         { name: '👥 Members', value: `${guild.approximate_member_count || 'N/A'} total`, inline: true },
         { name: '📁 Channels', value: `${channels.length} total`, inline: true },
         { name: '🛡️ Roles', value: `${roles.length} total`, inline: true },
-        { name: '✨ Boosts', value: `Level ${guild.premium_tier} (${guild.premium_subscription_count || 0} boosts)`, inline: true }
+        {
+          name: '✨ Boosts',
+          value: `Level ${guild.premium_tier} (${guild.premium_subscription_count || 0} boosts)`,
+          inline: true,
+        },
       ],
-      color: 0x5865F2
+      color: 0x5865f2,
     };
 
-    if (guild.banner) embed.image = { url: `https://cdn.discordapp.com/banners/${guild.id}/${guild.banner}.png?size=1024` };
+    if (guild.banner)
+      embed.image = { url: `https://cdn.discordapp.com/banners/${guild.id}/${guild.banner}.png?size=1024` };
 
     await client.reply(message, null, false, { embeds: [embed] });
   } catch (error) {
@@ -37,6 +46,6 @@ export default {
     description: 'Show information about the server.',
     slash: true,
     aliases: ['si', 'server'],
-    usage: 'serverinfo'
-  }
+    usage: 'serverinfo',
+  },
 };

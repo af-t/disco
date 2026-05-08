@@ -1,13 +1,18 @@
 {
   "name": "disco",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Discord bot application.",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
     "test": "node --test tests/**/*.test.js",
     "start": "node src/index.js",
-    "serve": "node src/store/server.js"
+    "serve": "node src/store/server.js",
+    "lint": "eslint src/ tests/",
+    "lint:fix": "eslint --fix src/ tests/",
+    "format": "prettier --check src/ tests/",
+    "format:fix": "prettier --write src/ tests/",
+    "check": "npm run lint && npm run format && npm test"
   },
   "repository": {
     "type": "git",
@@ -33,5 +38,12 @@
     "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.3.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3"
   }
 }

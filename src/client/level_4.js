@@ -5,17 +5,17 @@ import { WebSocket } from 'ws';
 
 // ---- Voice WebSocket opcodes ----
 const VOICE_OP = {
-  IDENTIFY:            0,
-  SELECT_PROTOCOL:     1,
-  READY:               2,
-  HEARTBEAT:           3,
+  IDENTIFY: 0,
+  SELECT_PROTOCOL: 1,
+  READY: 2,
+  HEARTBEAT: 3,
   SESSION_DESCRIPTION: 4,
-  SPEAKING:            5,
-  HEARTBEAT_ACK:       6,
-  RESUME:              7,
-  HELLO:               8,
-  RESUMED:             9,
-  CLIENT_DISCONNECT:  13,
+  SPEAKING: 5,
+  HEARTBEAT_ACK: 6,
+  RESUME: 7,
+  HELLO: 8,
+  RESUMED: 9,
+  CLIENT_DISCONNECT: 13,
 };
 
 // ---- Encryption mode nonce builders ----
@@ -45,20 +45,20 @@ const RTP_EXTENSION_LEN = 4; // lite profile extension
 function readRtpHeader(packet) {
   const buf = Buffer.from(packet);
   return {
-    type:     buf[1] & 0x7f,
-    seq:      buf.readUInt16BE(2),
-    ts:       buf.readUInt32BE(4),
-    ssrc:     buf.readUInt32BE(8),
-    hasExt:   !!(buf[0] & 0x10),
-    header:   buf.subarray(0, RTP_HEADER_LEN),
-    raw:      buf,
+    type: buf[1] & 0x7f,
+    seq: buf.readUInt16BE(2),
+    ts: buf.readUInt32BE(4),
+    ssrc: buf.readUInt32BE(8),
+    hasExt: !!(buf[0] & 0x10),
+    header: buf.subarray(0, RTP_HEADER_LEN),
+    raw: buf,
   };
 }
 
 function buildRtpHeader(ssrc, seq, timestamp) {
   const header = Buffer.alloc(RTP_HEADER_LEN);
-  header[0] = 0x80;     // version 2, no padding, no extension
-  header[1] = 0x78;     // payload type 120 (opus) + marker
+  header[0] = 0x80; // version 2, no padding, no extension
+  header[1] = 0x78; // payload type 120 (opus) + marker
   header.writeUInt16BE(seq, 2);
   header.writeUInt32BE(timestamp, 4);
   header.writeUInt32BE(ssrc, 8);
@@ -68,34 +68,35 @@ function buildRtpHeader(ssrc, seq, timestamp) {
 // ---- VoiceConnection (one per guild) ----
 class VoiceConnection {
   constructor(client, guildId, channelId, options = {}) {
-    this.client    = client;
-    this.guildId   = guildId;
+    this.client = client;
+    this.guildId = guildId;
     this.channelId = channelId;
-    this.options   = options;
+    this.options = options;
 
     // State
-    this.ssrc      = null;
+    this.ssrc = null;
     this.secretKey = null;
-    this.mode      = null;
-    this.udp       = null;
-    this.ws        = null;
+    this.mode = null;
+    this.udp = null;
+    this.ws = null;
     this.heartbeat = null;
     this.heartbeatJitter = null;
-    this.ackReceived  = true;
-    this.externalIp   = null;
+    this.ackReceived = true;
+    this.externalIp = null;
     this.externalPort = null;
-    this.ready        = false;
-    this.destroyed    = false;
-    this.sequence     = Math.floor(Math.random() * 65535);
-    this.timestamp    = Math.floor(Math.random() * 4294967295);
+    this.ready = false;
+    this.destroyed = false;
+    this.sequence = Math.floor(Math.random() * 65535);
+    this.timestamp = Math.floor(Math.random() * 4294967295);
     this._audioCallbacks = [];
+    this._speakingCallback = null; // store ref for cleanup (fixes B2)
 
     // Bind
-    this._onVoiceWsOpen    = this._onVoiceWsOpen.bind(this);
+    this._onVoiceWsOpen = this._onVoiceWsOpen.bind(this);
     this._onVoiceWsMessage = this._onVoiceWsMessage.bind(this);
-    this._onVoiceWsClose   = this._onVoiceWsClose.bind(this);
-    this._onVoiceWsError   = this._onVoiceWsError.bind(this);
-    this._onUdpMessage     = this._onUdpMessage.bind(this);
+    this._onVoiceWsClose = this._onVoiceWsClose.bind(this);
+    this._onVoiceWsError = this._onVoiceWsError.bind(this);
+    this._onUdpMessage = this._onUdpMessage.bind(this);
   }
 
   // --- Public API ---
@@ -111,14 +112,16 @@ class VoiceConnection {
 
   async setSpeaking(speaking) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({
-      op: VOICE_OP.SPEAKING,
-      d: {
-        speaking: speaking ? 1 : 0,
-        delay: 0,
-        ssrc: this.ssrc,
-      },
-    }));
+    this.ws.send(
+      JSON.stringify({
+        op: VOICE_OP.SPEAKING,
+        d: {
+          speaking: speaking ? 1 : 0,
+          delay: 0,
+          ssrc: this.ssrc,
+        },
+      }),
+    );
   }
 
   // --- Internal start flow ---
@@ -128,17 +131,17 @@ class VoiceConnection {
 
     const wsUrl = `wss://${endpoint.replace(/:80$/, '')}?v=8`;
     this.ws = new WebSocket(wsUrl);
-    this.ws.on('open',    () => this._onVoiceWsOpen(token));
+    this.ws.on('open', () => this._onVoiceWsOpen(token));
     this.ws.on('message', this._onVoiceWsMessage);
-    this.ws.on('close',   this._onVoiceWsClose);
-    this.ws.on('error',   this._onVoiceWsError);
+    this.ws.on('close', this._onVoiceWsClose);
+    this.ws.on('error', this._onVoiceWsError);
   }
 
   _onVoiceWsOpen(token) {
     this.ws._socket?.setNoDelay?.(true);
     this._sendVoiceOp(VOICE_OP.IDENTIFY, {
-      server_id:  this.guildId,
-      user_id:    this.client._session.user.id,
+      server_id: this.guildId,
+      user_id: this.client._session.user.id,
       session_id: this._voiceSessionId,
       token,
     });
@@ -157,16 +160,16 @@ class VoiceConnection {
         this._setupVoiceHeartbeat(data.d.heartbeat_interval);
         break;
       case VOICE_OP.READY:
-        this.ssrc  = data.d.ssrc;
-        this._ip   = data.d.ip;
+        this.ssrc = data.d.ssrc;
+        this._ip = data.d.ip;
         this._port = data.d.port;
         this._modes = data.d.modes;
         this._openUdp();
         break;
       case VOICE_OP.SESSION_DESCRIPTION:
         this.secretKey = Buffer.from(data.d.secret_key);
-        this.mode      = data.d.mode;
-        this.ready     = true;
+        this.mode = data.d.mode;
+        this.ready = true;
         this.client.emit('VOICE_CONNECT', { guild_id: this.guildId, channel_id: this.channelId });
         break;
       case VOICE_OP.HEARTBEAT_ACK:
@@ -175,15 +178,15 @@ class VoiceConnection {
       case VOICE_OP.SPEAKING:
         this.client.emit('VOICE_SPEAKING', {
           guild_id: this.guildId,
-          user_id:  data.d.user_id,
-          ssrc:     data.d.ssrc,
+          user_id: data.d.user_id,
+          ssrc: data.d.ssrc,
           speaking: data.d.speaking !== 0,
         });
         break;
       case VOICE_OP.CLIENT_DISCONNECT:
         this.client.emit('VOICE_DISCONNECT', {
           guild_id: this.guildId,
-          user_id:  data.d.user_id,
+          user_id: data.d.user_id,
         });
         break;
     }
@@ -231,7 +234,7 @@ class VoiceConnection {
         if (nullIdx > 0 && nullIdx < 100) {
           const ipStr = msg.toString('utf8', 0, nullIdx);
           const port = msg.readUInt16LE(msg.length - 2);
-          this.externalIp  = ipStr;
+          this.externalIp = ipStr;
           this.externalPort = port;
           clearTimeout(this._ipDiscoveryTimeout);
           this._selectProtocol(ipStr, port);
@@ -248,7 +251,7 @@ class VoiceConnection {
 
   _selectProtocol(ip, port) {
     const preferredModes = ['xsalsa20_poly1305_lite', 'xsalsa20_poly1305_suffix', 'xsalsa20_poly1305'];
-    const mode = preferredModes.find(m => this._modes.includes(m)) || this._modes[0];
+    const mode = preferredModes.find((m) => this._modes.includes(m)) || this._modes[0];
 
     this._sendVoiceOp(VOICE_OP.SELECT_PROTOCOL, {
       protocol: 'udp',
@@ -290,16 +293,20 @@ class VoiceConnection {
 
       const audioFrame = {
         guild_id: this.guildId,
-        user_id:  this._getUserIdForSsrc(rtp.ssrc),
-        ssrc:     rtp.ssrc,
+        user_id: this._getUserIdForSsrc(rtp.ssrc),
+        ssrc: rtp.ssrc,
         sequence: rtp.seq,
         timestamp: rtp.ts,
-        frame:    Buffer.from(decrypted),
+        frame: Buffer.from(decrypted),
       };
 
       this.client.emit('VOICE_AUDIO', audioFrame);
       for (const cb of this._audioCallbacks) {
-        try { cb(audioFrame); } catch { /* ignore */ }
+        try {
+          cb(audioFrame);
+        } catch {
+          /* ignore */
+        }
       }
     } catch {
       // Drop malformed packets silently
@@ -323,8 +330,8 @@ class VoiceConnection {
   _sendOpusFrame(frame) {
     if (!this.ready || !this.udp || !this.secretKey) return;
 
-    const seq  = this.sequence = (this.sequence + 1) & 0xffff;
-    const ts   = this.timestamp = (this.timestamp + 960) >>> 0; // 20ms at 48kHz
+    const seq = (this.sequence = (this.sequence + 1) & 0xffff);
+    const ts = (this.timestamp = (this.timestamp + 960) >>> 0); // 20ms at 48kHz
     const header = buildRtpHeader(this.ssrc, seq, ts);
 
     // Encrypt
@@ -337,7 +344,7 @@ class VoiceConnection {
     // Build packet: RTP header + lite extension (4 bytes nonce) + encrypted data
     const extHeader = Buffer.alloc(RTP_EXTENSION_LEN);
     extHeader.writeUInt16BE(0xbede, 0); // profile ID
-    extHeader.writeUInt16BE(1, 2);       // extensions count
+    extHeader.writeUInt16BE(1, 2); // extensions count
 
     const packet = Buffer.concat([header, extHeader, nonce.subarray(0, 4), encrypted]);
 
@@ -352,11 +359,14 @@ class VoiceConnection {
     this._clearVoiceHeartbeat();
     this.ackReceived = true;
 
-    this.heartbeatJitter = setTimeout(() => {
-      this.heartbeatJitter = null;
-      this._sendVoiceHeartbeat();
-      this.heartbeat = setInterval(() => this._sendVoiceHeartbeat(), interval);
-    }, Math.floor(Math.random() * interval));
+    this.heartbeatJitter = setTimeout(
+      () => {
+        this.heartbeatJitter = null;
+        this._sendVoiceHeartbeat();
+        this.heartbeat = setInterval(() => this._sendVoiceHeartbeat(), interval);
+      },
+      Math.floor(Math.random() * interval),
+    );
   }
 
   _sendVoiceHeartbeat() {
@@ -376,7 +386,7 @@ class VoiceConnection {
     clearTimeout(this.heartbeatJitter);
     clearInterval(this.heartbeat);
     this.heartbeatJitter = null;
-    this.heartbeat       = null;
+    this.heartbeat = null;
   }
 
   _sendVoiceOp(op, d) {
@@ -390,7 +400,13 @@ class VoiceConnection {
   _cleanup() {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.ready     = false;
+    this.ready = false;
+
+    // Remove SPEAKING listener to prevent leak on re-join (fixes B2)
+    if (this._speakingCallback) {
+      this.client.off('VOICE_SPEAKING', this._speakingCallback);
+      this._speakingCallback = null;
+    }
 
     this._clearVoiceHeartbeat();
 
@@ -403,7 +419,11 @@ class VoiceConnection {
     }
 
     if (this.udp) {
-      try { this.udp.close(); } catch { /* ignore */ }
+      try {
+        this.udp.close();
+      } catch {
+        /* ignore */
+      }
       this.udp = null;
     }
 
@@ -418,9 +438,9 @@ class VoiceConnection {
 // ---- DiscordClient (extends level_3) ----
 
 class DiscordClient extends level3 {
-  #voiceConnections  = new Map();
-  #pendingVoiceJoin   = new Map(); // guild_id -> { resolve, reject, channelId }
-  _voiceSessionId     = null;
+  #voiceConnections = new Map();
+  #pendingVoiceJoin = new Map(); // guild_id -> { resolve, reject, channelId }
+  _voiceSessionId = null;
 
   // ---- Public voice API ----
 
@@ -466,15 +486,17 @@ class DiscordClient extends level3 {
     if (!this._ws || this._ws.readyState !== 1) return;
 
     // Update voice state on main gateway
-    this._ws.send(JSON.stringify({
-      op: 4,
-      d: {
-        guild_id:   guildId,
-        channel_id: channelId,
-        self_mute:  options.selfMute  || false,
-        self_deaf:  options.selfDeaf  || false,
-      },
-    }));
+    this._ws.send(
+      JSON.stringify({
+        op: 4,
+        d: {
+          guild_id: guildId,
+          channel_id: channelId,
+          self_mute: options.selfMute || false,
+          self_deaf: options.selfDeaf || false,
+        },
+      }),
+    );
   }
 
   // ---- Override _handleDispatch to intercept voice events ----
@@ -493,7 +515,6 @@ class DiscordClient extends level3 {
         this._voiceSessionId = evData.session_id;
       }
       // Track SSRC mappings for audio receive
-      const conn = this.#voiceConnections.get(evData.guild_id);
       // We'll map when SPEAKING events come in
     }
 
@@ -509,18 +530,20 @@ class DiscordClient extends level3 {
 
     // Need a short delay for VOICE_STATE_UPDATE to arrive first
     if (!this._voiceSessionId) {
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     const conn = new VoiceConnection(this, guild_id, pending.channelId, this.options);
     this.#voiceConnections.set(guild_id, conn);
 
     // Listen for SPEAKING events on the main client to track SSRC↔user mappings
-    this.on('VOICE_SPEAKING', (ev) => {
+    // Store ref for cleanup to prevent listener leak on re-join (fixes B2)
+    conn._speakingCallback = (ev) => {
       if (ev.guild_id === guild_id && ev.ssrc) {
         conn._mapSsrcUser(ev.ssrc, ev.user_id);
       }
-    });
+    };
+    this.on('VOICE_SPEAKING', conn._speakingCallback);
 
     try {
       await conn._start(token, endpoint);
@@ -563,8 +586,12 @@ class DiscordClient extends level3 {
 
   async destroy() {
     // Leave all voice connections
-    for (const [guildId, conn] of this.#voiceConnections) {
-      try { await conn.destroy(); } catch { /* ignore */ }
+    for (const [_guildId, conn] of this.#voiceConnections) {
+      try {
+        await conn.destroy();
+      } catch {
+        /* ignore */
+      }
     }
     this.#voiceConnections.clear();
     this.#pendingVoiceJoin.clear();

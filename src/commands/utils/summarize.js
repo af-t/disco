@@ -13,11 +13,13 @@ const execute = async (client, message, _, args) => {
   let typing = true;
   const sendTyping = async () => {
     while (typing) {
-      await client.sendTyping(message.channel_id).catch(() => {});
-      await new Promise(r => setTimeout(r, 5000));
+      await client
+        .sendTyping(message.channel_id)
+        .catch((err) => client.logger?.warn?.('Typing indicator failed:', err));
+      await new Promise((r) => setTimeout(r, 5000));
     }
   };
-  
+
   sendTyping();
 
   try {
@@ -31,13 +33,13 @@ const execute = async (client, message, _, args) => {
     // Messages are fetched newest first, we need chronological order for AI
     const reversed = [...messages].reverse();
 
-    const chatLog = reversed.map(m => `[${m.author.username}]: ${m.content}`).join('\n');
+    const chatLog = reversed.map((m) => `[${m.author.username}]: ${m.content}`).join('\n');
 
     const prompt = [
-      { 
-        type: 'text', 
-        text: `Please provide a clear and concise summary of the following conversation. Highlight the key points discussed:\n\n${chatLog}` 
-      }
+      {
+        type: 'text',
+        text: `Please provide a clear and concise summary of the following conversation. Highlight the key points discussed:\n\n${chatLog}`,
+      },
     ];
 
     // Clear previous history if any, so the summary is isolated
@@ -46,13 +48,15 @@ const execute = async (client, message, _, args) => {
     let responseText = typeof response === 'string' ? response : '';
 
     if (responseText.length > 2000) {
-        responseText = responseText.substring(0, 1997) + '...';
+      responseText = responseText.substring(0, 1997) + '...';
     }
 
     await client.reply(message, `**Summary of the last ${messages.length} messages:**\n\n${responseText}`);
   } catch (err) {
-    console.error('Error summarizing messages:', err);
-    await client.reply(message, 'Sorry, an error occurred while trying to summarize the messages.').catch(() => {});
+    client.logger?.error?.('Error summarizing messages:', err);
+    await client
+      .reply(message, 'Sorry, an error occurred while trying to summarize the messages.')
+      .catch((err) => client.logger?.warn?.('Failed to send summarize error reply:', err));
   } finally {
     typing = false;
   }
@@ -74,8 +78,8 @@ export default {
         type: 4, // INTEGER
         required: false,
         min_value: 10,
-        max_value: 100
-      }
-    ]
-  }
+        max_value: 100,
+      },
+    ],
+  },
 };

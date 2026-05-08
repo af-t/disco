@@ -1,8 +1,9 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import level1 from './level_1.js';
 
-const BASE_URL     = process.env.DISCORD_API_BASE || 'https://discord.com/api/v10';
-const MAX_RETRIES  = parseInt(process.env.DISCORD_MAX_RETRIES, 10) || 3;
+const BASE_URL = process.env.DISCORD_API_BASE || 'https://discord.com/api/v10';
+const MAX_RETRIES = parseInt(process.env.DISCORD_MAX_RETRIES, 10) || 3;
+const RATELIMIT_MAX_DELAY = 300_000; // 5 minutes cap
 
 class DiscordClient extends level1 {
   async makeRequest(method, endpoint, body, headers = {}) {
@@ -12,10 +13,10 @@ class DiscordClient extends level1 {
       method,
       body: body ? JSON.stringify(body) : undefined,
       headers: {
-        'Authorization': `Bot ${this.token}`,
+        Authorization: `Bot ${this.token}`,
         'Content-Type': 'application/json',
-        ...headers
-      }
+        ...headers,
+      },
     };
     const targetUrl = BASE_URL + endpoint;
 
@@ -34,7 +35,11 @@ class DiscordClient extends level1 {
         throw data;
       } catch (err) {
         if (err?.retry_after) {
-          await sleep(err.retry_after * 1000);
+          // Exponential backoff with jitter for rate limits (fixes S5)
+          const baseDelay = err.retry_after * 1000;
+          const jitter = Math.random() * 1000;
+          const delay = Math.min(baseDelay * Math.pow(2, i) + jitter, RATELIMIT_MAX_DELAY);
+          await sleep(delay);
           continue; // Retry after sleep
         }
         if (err?.cause?.name !== 'ConnectTimeoutError' && i === MAX_RETRIES - 1) {
@@ -76,7 +81,10 @@ class DiscordClient extends level1 {
 
   async editMessage(message, content, options = {}) {
     if (message.isInteractionResponse) {
-      return this.editOriginalInteractionResponse(this._session.application.id, message.interactionToken, { content, ...options });
+      return this.editOriginalInteractionResponse(this._session.application.id, message.interactionToken, {
+        content,
+        ...options,
+      });
     }
     const { id, channel_id } = message;
     return this.makeRequest('PATCH', `/channels/${channel_id}/messages/${id}`, { content, ...options });
@@ -186,7 +194,7 @@ class DiscordClient extends level1 {
   }
 
   async banMember(guild_id, user_id, options = {}) {
-    let { reason, ...body } = options;
+    const { reason, ...body } = options;
     const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
     return this.makeRequest('PUT', `/guilds/${guild_id}/bans/${user_id}`, body, headers);
   }
@@ -199,12 +207,22 @@ class DiscordClient extends level1 {
   async muteMember(guild_id, user_id, duration = 0, reason) {
     const timeoutUntil = new Date(Date.now() + duration).toISOString();
     const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
-    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, { communication_disabled_until: timeoutUntil }, headers);
+    return this.makeRequest(
+      'PATCH',
+      `/guilds/${guild_id}/members/${user_id}`,
+      { communication_disabled_until: timeoutUntil },
+      headers,
+    );
   }
 
   async unmuteMember(guild_id, user_id, reason) {
     const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
-    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, { communication_disabled_until: null }, headers);
+    return this.makeRequest(
+      'PATCH',
+      `/guilds/${guild_id}/members/${user_id}`,
+      { communication_disabled_until: null },
+      headers,
+    );
   }
 
   async addGuildMember(guild_id, user_id, options = {}) {
@@ -236,33 +254,21 @@ class DiscordClient extends level1 {
   }
 
   async createInteractionResponse(interaction_id, interaction_token, body) {
-    return this.makeRequest(
-      'POST',
-      `/interactions/${interaction_id}/${interaction_token}/callback`,
-      body
-    );
+    return this.makeRequest('POST', `/interactions/${interaction_id}/${interaction_token}/callback`, body);
   }
 
   async editOriginalInteractionResponse(application_id, interaction_token, body) {
-    return this.makeRequest(
-      'PATCH',
-      `/webhooks/${application_id}/${interaction_token}/messages/@original`,
-      body
-    );
+    return this.makeRequest('PATCH', `/webhooks/${application_id}/${interaction_token}/messages/@original`, body);
   }
 
   async followupMessage(application_id, interaction_token, body) {
-    return this.makeRequest(
-      'POST',
-      `/webhooks/${application_id}/${interaction_token}`,
-      body
-    );
+    return this.makeRequest('POST', `/webhooks/${application_id}/${interaction_token}`, body);
   }
 
   async sendMessage(channel_id, content, options = {}) {
     return this.makeRequest('POST', `/channels/${channel_id}/messages`, {
       content,
-      ...options
+      ...options,
     });
   }
 
@@ -271,16 +277,25 @@ class DiscordClient extends level1 {
   }
 
   async addReaction(channel_id, message_id, emoji) {
-    return this.makeRequest('PUT', `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}/@me`);
+    return this.makeRequest(
+      'PUT',
+      `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}/@me`,
+    );
   }
 
   async removeReaction(channel_id, message_id, emoji, user_id) {
-    return this.makeRequest('DELETE', `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}/${user_id}`);
+    return this.makeRequest(
+      'DELETE',
+      `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}/${user_id}`,
+    );
   }
 
   async getReactions(channel_id, message_id, emoji, options = {}) {
     const params = new URLSearchParams(options);
-    return this.makeRequest('GET', `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}?${params}`);
+    return this.makeRequest(
+      'GET',
+      `/channels/${channel_id}/messages/${message_id}/reactions/${encodeURIComponent(emoji)}?${params}`,
+    );
   }
 
   async removeAllReactions(channel_id, message_id) {
@@ -312,7 +327,7 @@ class DiscordClient extends level1 {
   }
 
   async getGuildInvites(guild_id) {
-    return this._cacheableGet(`/guilds/${guild_id}/invites`)
+    return this._cacheableGet(`/guilds/${guild_id}/invites`);
   }
 
   async createThread(channel_id, options = {}) {

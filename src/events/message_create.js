@@ -1,22 +1,23 @@
 import permissionFlags from '../lib/permission.js';
+import tools from '../lib/utility.js';
 
-function formatAgo(since) {
-  const diff = Date.now() - since;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) return `${hours}h ${minutes % 60}m ago`;
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s ago`;
-  return `${seconds}s ago`;
-}
-
+const { formatAgo, getPermissions } = tools;
 const COMMAND_PREFIX = '.';
-const REQUEST_LIMIT = 4;
+
+// Rate limit: commands per second per user
+const RATE_LIMIT = {
+  DEFAULT: 5, // Most commands (ping, help, info, etc.)
+  MODERATE: 3, // Admin/mod commands (ban, kick, mute, purge)
+  HEAVY: 2, // AI/resource-intensive commands (ai, summarize)
+};
+
+/** Set of heavy (AI) command aliases */
+const HEAVY_COMMANDS = new Set(['ai', 'openrouter', 'chat', 'summarize', 'summary']);
 
 const parseDM = async (client, message) => {
   const content = message?.content;
   const userId = message?.author?.id;
-  const dm = client.tempDM.get(userId) || {contents: [], reading: false};
+  const dm = client.tempDM.get(userId) || { contents: [], reading: false };
 
   dm.contents.push(content);
   client.tempDM.set(userId, dm);
@@ -24,13 +25,15 @@ const parseDM = async (client, message) => {
   if (dm.reading) return {};
 
   dm.reading = true;
-  return new Promise((resolve) => setTimeout(() => {
-    client.tempDM.delete(userId); // delete first
-    resolve({
-      useAI: true,
-      rawArgs: dm.contents.join('\n')
-    });
-  }, 7000));
+  return new Promise((resolve) =>
+    setTimeout(() => {
+      client.tempDM.delete(userId); // delete first
+      resolve({
+        useAI: true,
+        rawArgs: dm.contents.join('\n'),
+      });
+    }, 7000),
+  );
 };
 
 const parseMessage = (client, message) => {
@@ -43,7 +46,7 @@ const parseMessage = (client, message) => {
     if (cmd) {
       args = args.slice(2);
       rawArgs = rawArgs.slice(1).trim().slice(cmd.length).trim();
-      return {cmd, args, rawArgs}
+      return { cmd, args, rawArgs };
     }
     return {};
   }
@@ -52,28 +55,18 @@ const parseMessage = (client, message) => {
     const cmd = args[0].slice(1).trim();
     args.shift();
     rawArgs = rawArgs.slice(1).trim().slice(cmd.length).trim();
-    return {cmd, args, rawArgs};
+    return { cmd, args, rawArgs };
   }
 
-  if (rawArgs.match(me)) { // Automatically use AI if bot is mentioned
-    return {useAI: true, rawArgs};
+  if (rawArgs.match(me)) {
+    // Automatically use AI if bot is mentioned
+    return { useAI: true, rawArgs };
   }
 
   return {};
 };
 
-const getPermissions = async (client, guild_id, member) => {
-  let perms = 0n;
-  let guildRoles;
-  for (const id of member.roles) {
-    if (!guildRoles) guildRoles = await client.getRoles(guild_id);
-    const role = guildRoles.find(r => r.id === id);
-    if (role) perms |= BigInt(role.permissions);
-  }
-  return perms;
-};
-
-export default async(client, m) => {
+export default async (client, m) => {
   const isGuildMessage = !!m.guild_id;
   const isSelf = m.author.id === client._session.user.id;
   const isBot = !!m.author.bot;
@@ -84,28 +77,84 @@ export default async(client, m) => {
   // Auto-moderation logic
   if (isGuildMessage) {
     // 1. Anti-link (ignore for admins/moderators)
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    if (urlRegex.test(m.content)) {
-      const member = m.member || await client.getGuildMember(m.guild_id, m.author.id);
-      const perms = await getPermissions(client, m.guild_id, member);
-      const isMod = (perms & 8n) === 8n || (perms & 0x0000000000002000n) === 0x0000000000002000n; // Admin or Manage Messages
+    const ALLOWED_DOMAINS = [
+      'discord.com',
+      'discord.gg',
+      'discordapp.com',
+      'discordapp.net',
+      'cdn.discordapp.com',
+      'media.discordapp.net',
+      'tenor.com',
+      'giphy.com',
+      'imgur.com',
+      'github.com',
+      'gitlab.com',
+      'bitbucket.org',
+      'youtube.com',
+      'youtu.be',
+      'twitch.tv',
+      'spotify.com',
+      'x.com',
+      'twitter.com',
+      'reddit.com',
+      'medium.com',
+      'stackoverflow.com',
+      'stackexchange.com',
+      'npmjs.com',
+      'docs.python.org',
+      'nodejs.org',
+      'canva.com',
+      'drive.google.com',
+      'docs.google.com',
+    ];
 
-      if (!isMod) {
-        await client.deleteMessage(m.channel_id, m.id);
-        const warn = await client.sendMessage(m.channel_id, `🚫 **${m.author.username}**, posting links is not allowed here!`);
-        setTimeout(() => client.deleteMessage(m.channel_id, warn.id).catch(() => {}), 5000);
-        return;
+    const urlRegex = /https?:\/\/([^\s/?#]+)/gi;
+    const urls = m.content?.match(urlRegex);
+    if (urls) {
+      const hasDisallowedLink = urls.some((url) => {
+        try {
+          const hostname = new URL(url).hostname.replace(/^www\./, '');
+          return !ALLOWED_DOMAINS.some((allowed) => hostname === allowed || hostname.endsWith('.' + allowed));
+        } catch {
+          return true; // Invalid URL, treat as disallowed
+        }
+      });
+
+      if (hasDisallowedLink) {
+        const member = m.member || (await client.getGuildMember(m.guild_id, m.author.id));
+        const perms = await getPermissions(client, m.guild_id, member);
+        const isMod =
+          (perms & permissionFlags.ADMINISTRATOR) === permissionFlags.ADMINISTRATOR ||
+          (perms & permissionFlags.MANAGE_MESSAGES) === permissionFlags.MANAGE_MESSAGES; // Admin or Manage Messages
+
+        if (!isMod) {
+          await client.deleteMessage(m.channel_id, m.id);
+          const warn = await client.sendMessage(
+            m.channel_id,
+            `🚫 **${m.author.username}**, posting links is not allowed here!`,
+          );
+          setTimeout(
+            () =>
+              client
+                .deleteMessage(m.channel_id, warn.id)
+                .catch((err) => client.logger?.warn?.('Failed to delete link warning:', err)),
+            5000,
+          );
+          return;
+        }
       }
     }
 
-    // 2. Anti-spam (repetitive content)
+    // 2. Anti-spam (repetitive content) - with normalization (fixes M2)
+    const normalizeContent = (str) => str?.trim().toLowerCase().replace(/\s+/g, ' ') ?? '';
+    const normalizedContent = normalizeContent(m.content);
     const lastMsgKey = `last_msg:${m.author.id}:${m.channel_id}`;
     const lastMsg = await client.store.get(lastMsgKey);
-    if (lastMsg === m.content && m.content.length > 5) {
+    if (lastMsg === normalizedContent && normalizedContent.length > 5) {
       await client.deleteMessage(m.channel_id, m.id);
       return; // Silently delete repetitive spam
     }
-    await client.store.set(lastMsgKey, m.content, true); // TTL will handle cleanup
+    await client.store.set(lastMsgKey, normalizedContent, true); // TTL will handle cleanup
   }
 
   // AFK detection
@@ -116,12 +165,21 @@ export default async(client, m) => {
     if (afkData) {
       await client.store.delete(afkKey);
       const ago = formatAgo(afkData.since);
-      const reply = await client.sendMessage(m.channel_id, `👋 Welcome back **${m.author.global_name || m.author.username}**! You were AFK since ${ago}.`);
-      setTimeout(() => client.deleteMessage(m.channel_id, reply.id).catch(() => {}), 5000);
+      const reply = await client.sendMessage(
+        m.channel_id,
+        `👋 Welcome back **${m.author.global_name || m.author.username}**! You were AFK since ${ago}.`,
+      );
+      setTimeout(
+        () =>
+          client
+            .deleteMessage(m.channel_id, reply.id)
+            .catch((err) => client.logger?.warn?.('Failed to delete AFK welcome:', err)),
+        5000,
+      );
     }
 
     // Hook B: Notify about AFK-mentioned users
-    const mentions = [...m.content.matchAll(/<@!?(\d+)>/g)].map(m => m[1]);
+    const mentions = [...(m.content?.matchAll(/<@!?(\d+)>/g) ?? [])].map((match) => match[1]);
     const afkMentions = [];
     for (const uid of [...new Set(mentions)]) {
       if (uid === m.author.id) continue;
@@ -131,60 +189,84 @@ export default async(client, m) => {
       }
     }
     if (afkMentions.length) {
-      const lines = afkMentions.map(a => `💤 <@${a.id}> is AFK: _${a.message}_ (${formatAgo(a.since)})`);
+      const lines = afkMentions.map((a) => `💤 <@${a.id}> is AFK: _${a.message}_ (${formatAgo(a.since)})`);
       const reply = await client.sendMessage(m.channel_id, lines.join('\n'));
-      setTimeout(() => client.deleteMessage(m.channel_id, reply.id).catch(() => {}), 10000);
+      setTimeout(
+        () =>
+          client
+            .deleteMessage(m.channel_id, reply.id)
+            .catch((err) => client.logger?.warn?.('Failed to delete AFK mention notice:', err)),
+        10000,
+      );
     }
   }
 
-  const {
-    useAI, cmd,
-    args,
-    rawArgs
-  } = await (isGuildMessage ? parseMessage(client, m) : parseDM(client, m));
+  const { useAI, cmd, args, rawArgs } = await (isGuildMessage ? parseMessage(client, m) : parseDM(client, m));
 
   if (cmd) {
-    const cached = (await client.store.has(`request_limit:${m.author.id}`)) ?
-      await client.store.get(`request_limit:${m.author.id}`) :
-      {
-        notified: false,
-        time: Date.now(),
-        count: 0
-      };
+    const cached = (await client.store.has(`request_limit:${m.author.id}`))
+      ? await client.store.get(`request_limit:${m.author.id}`)
+      : {
+          notified: false,
+          time: Date.now(),
+          count: 0,
+        };
+
+    // Determine rate limit based on command type
+    const cmdLower = cmd.toLowerCase();
+    const maxPerSec = HEAVY_COMMANDS.has(cmdLower)
+      ? RATE_LIMIT.HEAVY
+      : client.commands[cmdLower]?.permissions?.length
+        ? RATE_LIMIT.MODERATE
+        : RATE_LIMIT.DEFAULT;
 
     if (Date.now() - cached.time > 1000) {
       cached.time = Date.now();
       cached.count = 0;
-      cached.notified = true;
+      cached.notified = false;
     }
-    if (++cached.count > REQUEST_LIMIT) {
+    if (++cached.count > maxPerSec) {
       if (cached.notified) return;
-      const reply = await client.sendMessage(m.channel_id, `**${m.author.global_name || m.author.username}**! Please slow down~ You're a little too fast.`);
-      setTimeout(() => client.deleteMessage(m.channel_id, reply.id), 3000);
       cached.notified = true;
+      await client.store.set(`request_limit:${m.author.id}`, cached, true);
+      const reply = await client.sendMessage(
+        m.channel_id,
+        `**${m.author.global_name || m.author.username}**! Please slow down~ You're a little too fast.`,
+      );
+      setTimeout(() => client.deleteMessage(m.channel_id, reply.id), 3000);
       return;
     }
     await client.store.set(`request_limit:${m.author.id}`, cached, true);
 
     let allow = true;
 
-    if (client.commands[cmd]?.permissions) if (isGuildMessage) {
-      const member = m.member || await client.getGuildMember(m.guild_id, m.author.id);
-      const perms = await getPermissions(client, m.guild_id, member);
-
-      const hasAdmin = (perms & 8n) === 8n;
-
-      for (let perm of client.commands[cmd].permissions) {
-        perm = permissionFlags[perm];
-        if (perm) {
-          allow = allow ? (perms & perm) === perm : false;
-          allow = allow || hasAdmin;
+    if (client.commands[cmd]?.permissions?.length) {
+      if (isGuildMessage) {
+        const member = m.member || (await client.getGuildMember(m.guild_id, m.author.id));
+        if (!member?.roles) {
+          allow = false;
         } else {
-          client.logger.warn(`Unknown permission ${perm} from command:`, cmd);
+          const perms = await getPermissions(client, m.guild_id, member);
+          const hasAdmin = (perms & permissionFlags.ADMINISTRATOR) === permissionFlags.ADMINISTRATOR;
+
+          // Admin bypass: if user has ADMINISTRATOR, allow all commands
+          if (hasAdmin) {
+            allow = true;
+          } else {
+            // Use Array.every() for clean permission checking (fixes C2)
+            allow = client.commands[cmd].permissions.every((permName) => {
+              const flag = permissionFlags[permName];
+              if (!flag) {
+                client.logger.warn(`Unknown permission "${permName}" from command:`, cmd);
+                return false;
+              }
+              return (perms & flag) === flag;
+            });
+          }
         }
+      } else {
+        allow = false;
       }
-    } else {
-      allow = false;
     }
 
     if (allow) {

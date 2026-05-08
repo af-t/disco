@@ -18,9 +18,9 @@ class DiscordClient extends level2 {
 
   async uploadToDiscord(channel_id, files = []) {
     if (!files.length) throw new Error('files must contain at least 1 item');
-    files = (await Promise.allSettled(files.map(x => this._fileInfo(x))))
-      .filter(x => x.status === 'fulfilled')
-      .map(x => x.value);
+    files = (await Promise.allSettled(files.map((x) => this._fileInfo(x))))
+      .filter((x) => x.status === 'fulfilled')
+      .map((x) => x.value);
 
     const results = new Array(files.length);
     const upload = [];
@@ -37,34 +37,32 @@ class DiscordClient extends level2 {
     }
 
     if (upload.length > 0) {
-      const response = await this.makeRequest(
-        'POST',
-        `/channels/${channel_id}/attachments`,
-        {
-          files: upload.map(x => ({ filename: x.filename, file_size: x.file_size }))
-        }
-      );
+      const response = await this.makeRequest('POST', `/channels/${channel_id}/attachments`, {
+        files: upload.map((x) => ({ filename: x.filename, file_size: x.file_size })),
+      });
 
       const attachments = response.attachments || [];
-      await Promise.all(attachments.map(async(x, i) => {
-        const stream = fs.createReadStream(upload[i].filepath);
-        const res = await fetch(x.upload_url, {
-          method: 'PUT',
-          headers: {
-            'Content-Length': upload[i].file_size,
-            'Content-Type': 'application/octet-stream'
-          },
-          body: stream,
-          duplex: 'half'
-        });
-        if (!res.ok) throw new Error(`Failed to upload file '${upload[i].filename}': ${res.statusText}`);
-      }));
+      await Promise.all(
+        attachments.map(async (x, i) => {
+          const stream = fs.createReadStream(upload[i].filepath);
+          const res = await fetch(x.upload_url, {
+            method: 'PUT',
+            headers: {
+              'Content-Length': upload[i].file_size,
+              'Content-Type': 'application/octet-stream',
+            },
+            body: stream,
+            duplex: 'half',
+          });
+          if (!res.ok) throw new Error(`Failed to upload file '${upload[i].filename}': ${res.statusText}`);
+        }),
+      );
 
       attachments.forEach((x, i) => {
         const data = {
           id: uploadIndices[i],
           uploaded_filename: x.upload_filename,
-          filename: upload[i].filename
+          filename: upload[i].filename,
         };
         this.store.set(`sum:${upload[i].checksum}`, data);
         results[uploadIndices[i]] = data;
@@ -81,7 +79,7 @@ class DiscordClient extends level2 {
       filename: null,
       file_size: 0,
       checksum: null,
-      filepath: null
+      filepath: null,
     };
 
     if (file.startsWith('http://') || file.startsWith('https://')) {
@@ -101,8 +99,8 @@ class DiscordClient extends level2 {
         this._temps.set(file, result);
       }
     } else if (fs.existsSync(file)) {
-      result.filename  = path.basename(file);
-      result.filepath  = file;
+      result.filename = path.basename(file);
+      result.filepath = file;
       result.file_size = fs.statSync(file).size;
     } else {
       throw new Error(`file '${file}' cannot be handled`);
@@ -112,8 +110,8 @@ class DiscordClient extends level2 {
       const stream = fs.createReadStream(result.filepath);
       const csum = createHash('sha3-256'); // use latest algoritm
       csum.on('error', reject);
-      stream.on('data', chunk => csum.update(chunk));
-      stream.on('end', () => resolve(Array.from(csum.digest(), x => x.toString(36)).join('')));
+      stream.on('data', (chunk) => csum.update(chunk));
+      stream.on('end', () => resolve(Array.from(csum.digest(), (x) => x.toString(36)).join('')));
     });
 
     return result;
@@ -130,20 +128,16 @@ class DiscordClient extends level2 {
       return {
         isInteractionResponse: true,
         interactionToken: message.interactionToken,
-        channel_id: message.channel_id
+        channel_id: message.channel_id,
       };
     }
 
     const { channel_id, id } = message;
-    return this.sendMessage(
-      channel_id,
-      content,
-      {
-        message_reference: { channel_id, message_id: id },
-        ...(mention ? {} : { allowed_mentions: {} }),
-        ...options
-      }
-    );
+    return this.sendMessage(channel_id, content, {
+      message_reference: { channel_id, message_id: id },
+      ...(mention ? {} : { allowed_mentions: {} }),
+      ...options,
+    });
   }
 
   async destroy() {

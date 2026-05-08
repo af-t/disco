@@ -31,7 +31,7 @@ wss.on('connection', (ws, req) => {
   // Apply timeout
   setTimeout(() => req.socket.destroy(), 180_000).unref();
 
-  ws.on('message', async(m) => {
+  ws.on('message', async (m) => {
     try {
       m = JSON.parse(m);
     } catch {
@@ -67,8 +67,8 @@ wss.on('connection', (ws, req) => {
         data = await store[op](...args);
       } finally {
         ws.send(serialize({ id, data }));
-        return;
       }
+      return;
     }
 
     if (op === 'set-attr') {
@@ -87,12 +87,14 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(process.env.STORE_SERVER_PORT || 3000);
-['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, async () => {
-  await store?.close?.();
-  for (const [ip, socket] of requestLog.entries()) {
-    socket.destroy();
-    requestLog.delete(ip);
-  }
+['SIGTERM', 'SIGINT'].forEach((sig) =>
+  process.on(sig, async () => {
+    await store?.close?.();
+    for (const [ip, socket] of requestLog.entries()) {
+      socket.destroy();
+      requestLog.delete(ip);
+    }
 
-  server.close();
-}));
+    server.close();
+  }),
+);
