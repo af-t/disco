@@ -39,7 +39,7 @@ class StoreManager extends StoreBase {
       this._log('info', 'start completed');
     } catch {
       this._log('warn', 'disk unavailable, switching to memory-only mode');
-      // Cap at heap limit rather than Infinity to avoid unbounded growth.
+      // cap at heap limit to avoid unbounded growth
       this.maxMemory = v8.getHeapStatistics().heap_size_limit;
       this.memoryTTL = this.diskTTL;
       this.diskPath = null;
@@ -63,7 +63,7 @@ class StoreManager extends StoreBase {
       try {
         await task();
       } catch {
-        /* already logged inside tasks */
+        // already logged inside tasks
       }
     }
 
@@ -213,7 +213,7 @@ class StoreManager extends StoreBase {
               try {
                 await this.onDelete(k, m);
               } catch {
-                /* ignore */
+                // ignore
               }
             }
           }
@@ -253,7 +253,7 @@ class StoreManager extends StoreBase {
             try {
               await fs.rm(meta.locationFile);
             } catch {
-              /* file may already be gone */
+              // file may already be gone
             }
             meta.location = LOCATION.MEMORY;
           }
@@ -369,7 +369,7 @@ class StoreManager extends StoreBase {
       try {
         await fs.rm(meta.locationFile);
       } catch {
-        /* already gone */
+        // already gone
       }
     }
   }

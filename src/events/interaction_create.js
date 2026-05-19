@@ -10,7 +10,7 @@ const RATE_LIMIT = {
   HEAVY: 2,
 };
 
-const HEAVY_COMMANDS = new Set(['ai', 'openrouter', 'chat', 'summarize', 'summary']);
+const HEAVY_COMMANDS = new Set(['ai', 'openrouter', 'chat', 'summarize', 'summary', 'recap']);
 
 export default async (client, interaction) => {
   // Autocomplete handling (type 4)
@@ -122,7 +122,7 @@ export default async (client, interaction) => {
     interactionId: interaction.id,
   };
 
-  // Shim reply method supporting both immediate (type 4) and deferred (type 5) responses
+  // reply shim handles immediate and deferred paths
   let deferred = false;
   mockMessage.reply = async (content, options = {}) => {
     const payload = typeof content === 'string' ? { content } : content;
@@ -180,7 +180,7 @@ export default async (client, interaction) => {
           content: '❌ An unexpected error occurred while executing this command.',
         });
       } catch {
-        /* interaction may have expired */
+        // interaction may have expired
       }
     }
   }

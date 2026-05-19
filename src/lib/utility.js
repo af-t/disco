@@ -167,7 +167,7 @@ async function deploySlashCommands(client, commands) {
     }
   }
 
-  // Compute a hash of the current command definitions to avoid unnecessary PUT
+  // hash skips PUT when commands unchanged
   const crypto = await import('node:crypto');
   const hash = crypto.createHash('sha256').update(JSON.stringify(slashCommands)).digest('hex');
   const lastHash = await client.store.get('slash_commands_hash');

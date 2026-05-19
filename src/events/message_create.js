@@ -12,7 +12,7 @@ const RATE_LIMIT = {
 };
 
 /** Set of heavy (AI) command aliases */
-const HEAVY_COMMANDS = new Set(['ai', 'openrouter', 'chat', 'summarize', 'summary']);
+const HEAVY_COMMANDS = new Set(['ai', 'openrouter', 'chat', 'summarize', 'summary', 'recap']);
 
 const parseDM = async (client, message) => {
   const content = message?.content;

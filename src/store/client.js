@@ -58,7 +58,7 @@ class StoreClient extends StoreBase {
       try {
         await task();
       } catch {
-        /* already logged inside tasks */
+        // already logged inside tasks
       }
     }
 
@@ -68,7 +68,7 @@ class StoreClient extends StoreBase {
       try {
         await this._send('close');
       } catch {
-        /* ignore */
+        // ignore
       }
       this._ws.close();
       this._ws = null;
@@ -230,7 +230,7 @@ class StoreClient extends StoreBase {
               try {
                 await this.onDelete(k, m);
               } catch {
-                /* ignore */
+                // ignore
               }
             }
           }
@@ -239,7 +239,7 @@ class StoreClient extends StoreBase {
           try {
             await this._send('clear');
           } catch {
-            /* server might be down, ignore */
+            // server might be down, ignore
           }
         };
 
@@ -303,7 +303,7 @@ class StoreClient extends StoreBase {
             return this._data.get(key);
           }
 
-          // 2. Check server (if we know it's there OR we don't know it's NOT there)
+          // fall back to server when memory missed
           if (!meta || meta.location === LOCATION.SERVER) {
             this._stats.cache.promotions++;
             try {
@@ -327,7 +327,7 @@ class StoreClient extends StoreBase {
                 try {
                   newMeta.dataSizeV8 = serialize(value).length;
                 } catch {
-                  /* ignore */
+                  // ignore
                 }
 
                 this._data.set(key, value);
@@ -394,7 +394,7 @@ class StoreClient extends StoreBase {
       try {
         await this._send('delete', [_key]);
       } catch {
-        /* ignore */
+        // ignore
       }
     }
   }
@@ -473,7 +473,7 @@ class StoreClient extends StoreBase {
         this._retryAttempt = 0; // reset on successful connection (fixes B3)
         try {
           this._ws._socket.setNoDelay(true);
-          // Strip diskPath from config sent to server — server uses its own
+          // server uses its own diskPath, not ours
           const serverConfig = { ...this.config };
           delete serverConfig.diskPath;
           await this._send('new', [serverConfig]);

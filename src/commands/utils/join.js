@@ -5,15 +5,12 @@ const execute = async (client, message, args) => {
   if (!channelId)
     return client.reply(message, 'Please provide a voice channel ID or mention. Usage: `.join <channel_id>`');
 
-  // For slash commands, args[0] may already be a valid channel ID
   let targetChannel;
 
   try {
-    // Try to resolve the channel ID from mention or raw ID
     const mentionMatch = channelId.match(/<#(\d+)>/);
     const resolvedId = mentionMatch ? mentionMatch[1] : channelId;
 
-    // Fetch the channel to validate it exists and is a voice channel
     targetChannel = await client.getChannel(resolvedId);
     if (!targetChannel) {
       return client.reply(message, 'Channel not found. Please provide a valid voice channel.');

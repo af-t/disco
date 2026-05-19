@@ -211,7 +211,7 @@ class VoiceConnection {
       this.client.logger?.error?.(`UDP error [${this.guildId}]:`, err.message);
     });
 
-    // IP discovery: send 70 null bytes, receive null-terminated IP + port
+    // IP discovery per Discord voice protocol
     this.udp.send(Buffer.alloc(70, 0), this._port, this._ip, (err) => {
       if (err) this.client.logger?.error?.('IP discovery send failed:', err.message);
     });
@@ -305,7 +305,7 @@ class VoiceConnection {
         try {
           cb(audioFrame);
         } catch {
-          /* ignore */
+          // ignore
         }
       }
     } catch {
@@ -319,7 +319,7 @@ class VoiceConnection {
     return this._ssrcUsers.get(ssrc) || null;
   }
 
-  // Store user_id for an SSRC (set by client on VOICE_SPEAKING events)
+  // SSRC→user mapping populated on VOICE_SPEAKING
   _mapSsrcUser(ssrc, userId) {
     if (!this._ssrcUsers) this._ssrcUsers = new Map();
     this._ssrcUsers.set(ssrc, userId);
@@ -341,7 +341,7 @@ class VoiceConnection {
     const encrypted = nacl.secretbox(frame, nonce, this.secretKey);
     if (!encrypted) return;
 
-    // Build packet: RTP header + lite extension (4 bytes nonce) + encrypted data
+    // RTP header + lite ext + ciphertext
     const extHeader = Buffer.alloc(RTP_EXTENSION_LEN);
     extHeader.writeUInt16BE(0xbede, 0); // profile ID
     extHeader.writeUInt16BE(1, 2); // extensions count
@@ -422,7 +422,7 @@ class VoiceConnection {
       try {
         this.udp.close();
       } catch {
-        /* ignore */
+        // ignore
       }
       this.udp = null;
     }
@@ -536,8 +536,7 @@ class DiscordClient extends level3 {
     const conn = new VoiceConnection(this, guild_id, pending.channelId, this.options);
     this.#voiceConnections.set(guild_id, conn);
 
-    // Listen for SPEAKING events on the main client to track SSRC↔user mappings
-    // Store ref for cleanup to prevent listener leak on re-join (fixes B2)
+    // Stored ref prevents listener leak on re-join (B2)
     conn._speakingCallback = (ev) => {
       if (ev.guild_id === guild_id && ev.ssrc) {
         conn._mapSsrcUser(ev.ssrc, ev.user_id);
@@ -590,7 +589,7 @@ class DiscordClient extends level3 {
       try {
         await conn.destroy();
       } catch {
-        /* ignore */
+        // ignore
       }
     }
     this.#voiceConnections.clear();

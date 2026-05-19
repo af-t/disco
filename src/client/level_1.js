@@ -95,7 +95,7 @@ class DiscordClient extends EventEmitter {
     if (!this._initialised) throw new Error('Call ready() before connecting');
     if (this.status !== 'closed') return;
 
-    // Tear down any existing socket cleanly before opening a new one.
+    // tear down stale socket before reopening
     if (this._ws) {
       this._ws.removeAllListeners();
       if (this._ws.readyState < WebSocket.CLOSING) this._ws.terminate();
@@ -173,7 +173,7 @@ class DiscordClient extends EventEmitter {
           this._ws.terminate();
           break;
         case 9: // Invalid session
-          // d=true means the session can be resumed; d=false means start fresh.
+          // d=true resumable, d=false start fresh
           d ? this._resume() : this._reset();
           break;
         case 10: // Hello
@@ -301,7 +301,7 @@ class DiscordClient extends EventEmitter {
     this._clearHeartbeat();
     this._ackReceived = true;
 
-    // the first beat fires (e.g. if close arrives during the jitter window).
+    // jittered first beat per Discord spec
     this._heartbeatJitter = setTimeout(
       () => {
         this._heartbeatJitter = null;

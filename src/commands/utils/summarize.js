@@ -67,7 +67,7 @@ export default {
   data: {
     name: 'summarize',
     description: 'Summarizes the recent messages in this channel.',
-    aliases: ['summary'],
+    aliases: ['summary', 'recap'],
     usage: 'summarize [count]',
     permissions: ['READ_MESSAGE_HISTORY'],
     slash: true,

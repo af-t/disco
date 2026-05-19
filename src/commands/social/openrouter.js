@@ -116,9 +116,6 @@ const execute = async (client, message, _, args) => {
     sendTyping(client, message, () => typing);
 
     try {
-      // Set workspace path for the agent (avoid global chdir side-effect)
-      process.env.AGENT_WORKSPACE = session.path;
-
       const prompt = [...attachments, { type: 'text', text: args }];
       agent.messages = [...session.messages];
 
@@ -143,7 +140,6 @@ const execute = async (client, message, _, args) => {
     } finally {
       typing = false;
       await client.store.set(sessionKey, session, { ttl: 7_200_000 });
-      delete process.env.AGENT_WORKSPACE;
       workspaces.set(sessionKey, session.path);
     }
   });

@@ -1,5 +1,4 @@
 const execute = async (client, message) => {
-  // Check if bot is in a voice channel in this guild
   const currentConnection = client.getVoiceConnection(message.guild_id);
   if (!currentConnection) {
     return client.reply(message, '❌ I am not currently in a voice channel in this server.');
