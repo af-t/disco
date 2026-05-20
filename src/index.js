@@ -1,6 +1,7 @@
 import Discord from './client/level_4.js';
 import Store from './store/client.js';
 import tools from './lib/utility.js';
+import * as ai from './ai/index.js';
 import dotenv from 'dotenv';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +29,7 @@ await client.ready();
 client.once('READY', async () => {
   client.commands = await tools.importCommands(COMMANDS_PATH);
   tools.deploySlashCommands(client, client.commands);
+  await ai.init(client);
 });
 
 ['SIGTERM', 'SIGINT'].forEach((sig) =>

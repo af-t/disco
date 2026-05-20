@@ -66,6 +66,17 @@ const parseMessage = (client, message) => {
   return {};
 };
 
+const parseDMCommand = (m) => {
+  const raw = (m.content ?? '').trim();
+  if (!raw.startsWith(COMMAND_PREFIX)) return {};
+  const rest = raw.slice(COMMAND_PREFIX.length).trim();
+  const args = rest.split(/ +/);
+  const cmd = args.shift();
+  if (!cmd) return {};
+  const rawArgs = rest.slice(cmd.length).trim();
+  return { cmd, args, rawArgs };
+};
+
 export default async (client, m) => {
   const isGuildMessage = !!m.guild_id;
   const isSelf = m.author.id === client._session.user.id;
@@ -201,7 +212,14 @@ export default async (client, m) => {
     }
   }
 
-  const { useAI, cmd, args, rawArgs } = await (isGuildMessage ? parseMessage(client, m) : parseDM(client, m));
+  const naturalMode = !!client.aiRuntime;
+
+  const parsed = isGuildMessage
+    ? parseMessage(client, m)
+    : naturalMode
+      ? { useAI: false, ...parseDMCommand(m) }
+      : await parseDM(client, m);
+  const { useAI, cmd, args, rawArgs } = parsed;
 
   if (cmd) {
     const cached = (await client.store.has(`request_limit:${m.author.id}`))
@@ -286,6 +304,11 @@ export default async (client, m) => {
 
   if (useAI) {
     await client.commands.ai?.(client, m, args, rawArgs);
+    return;
+  }
+
+  if (naturalMode && !cmd) {
+    await client.aiRuntime.onMessage(m).catch((err) => client.logger?.error?.('runtime.onMessage failed', err));
     return;
   }
 };
