@@ -153,7 +153,6 @@ class DiscordClient extends EventEmitter {
 
   _onOpen() {
     this._ws._socket.setNoDelay(true);
-    this._session.id ? this._resume() : this._identify();
     this.emit('OPEN');
   }
 
@@ -178,6 +177,8 @@ class DiscordClient extends EventEmitter {
           break;
         case 10: // Hello
           this._setupHeartbeat(d.heartbeat_interval);
+          // identify only after Hello — sending it on open races to a 4002 close
+          this._session.id ? this._resume() : this._identify();
           break;
         case 11: // Heartbeat ACK
           this._ackReceived = true;
@@ -199,6 +200,11 @@ class DiscordClient extends EventEmitter {
         this._session.user = evData.user;
         this._session.application = evData.application;
         this._gatewayUrl = evData.resume_gateway_url;
+        this._reconnectAttempt = 0;
+        break;
+      case 'RESUMED':
+        // a resume restores a live connection but never emits READY
+        this.status = 'ready';
         this._reconnectAttempt = 0;
         break;
       case 'GUILD_CREATE':
@@ -245,11 +251,16 @@ class DiscordClient extends EventEmitter {
 
     if (this._destroyed) return;
 
-    const nonResumable = [4004, 4010, 4011, 4012, 4013, 4014];
-    if (nonResumable.includes(code)) {
-      this._reset();
+    // fatal codes mean broken config (token, shard, intents) — reconnecting only
+    // loops and re-IDENTIFYs, which can trip the daily limit and reset the token
+    const fatal = [4004, 4010, 4011, 4012, 4013, 4014];
+    if (fatal.includes(code)) {
+      this._destroyed = true;
+      this.emit('FATAL', code, reasonStr);
+      return;
     }
 
+    // bad seq or expired session — reconnect, but with a fresh identify
     if (code === 4007 || code === 4009) {
       this._reset();
     }

@@ -21,31 +21,41 @@ class DiscordClient extends level1 {
     const targetUrl = BASE_URL + endpoint;
 
     for (let i = 0; i < MAX_RETRIES; i++) {
+      let res;
       try {
-        const res = await fetch(targetUrl, options);
-        const buffer = await res.arrayBuffer();
-        let data;
-        try {
-          data = JSON.parse(Buffer.from(buffer));
-        } catch {
-          data = Buffer.from(buffer);
-        }
-
-        if (res.ok) return data;
-        throw data;
+        res = await fetch(targetUrl, options);
       } catch (err) {
-        if (err?.retry_after) {
-          // Exponential backoff with jitter for rate limits (fixes S5)
-          const baseDelay = err.retry_after * 1000;
-          const jitter = Math.random() * 1000;
-          const delay = Math.min(baseDelay * Math.pow(2, i) + jitter, RATELIMIT_MAX_DELAY);
-          await sleep(delay);
-          continue; // Retry after sleep
-        }
-        if (err?.cause?.name !== 'ConnectTimeoutError' && i === MAX_RETRIES - 1) {
-          throw err;
-        }
+        // genuine network fault — retry until attempts run out
+        if (i === MAX_RETRIES - 1) throw err;
+        continue;
       }
+
+      const buffer = await res.arrayBuffer();
+      let data;
+      try {
+        data = JSON.parse(Buffer.from(buffer));
+      } catch {
+        data = Buffer.from(buffer);
+      }
+
+      if (res.ok) return data;
+
+      // honor the server's Retry-After exactly — multiplying it just over-waits
+      if (res.status === 429) {
+        const retryAfter = data?.retry_after ?? 1;
+        await sleep(Math.min(retryAfter * 1000 + Math.random() * 1000, RATELIMIT_MAX_DELAY));
+        continue;
+      }
+
+      // 5xx is a transient server fault — back off and retry
+      if (res.status >= 500) {
+        if (i === MAX_RETRIES - 1) throw data;
+        await sleep(Math.min(1000 * Math.pow(2, i) + Math.random() * 1000, RATELIMIT_MAX_DELAY));
+        continue;
+      }
+
+      // 4xx is deterministic — retrying only burns the Cloudflare invalid-request budget
+      throw data;
     }
     throw new Error(`Request failed after ${MAX_RETRIES} attempt(s)`);
   }
