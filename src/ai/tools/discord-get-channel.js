@@ -12,23 +12,22 @@ function sanitize(ch) {
   };
 }
 
-export function createDiscordGetChannelTool({ client }) {
-  return {
-    name: 'discord_get_channel',
-    description: 'Fetch metadata about a Discord channel: name, topic, type, parent category, nsfw flag.',
-    parallelSafe: true,
-    input_schema: {
-      type: 'object',
-      properties: { channel_id: { type: 'string' } },
-      required: ['channel_id'],
-    },
-    execute: async ({ channel_id }) => {
-      try {
-        const ch = await client.getChannel(channel_id);
-        return JSON.stringify({ ok: true, channel: sanitize(ch) });
-      } catch (err) {
-        return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
-      }
-    },
-  };
+export const definition = {
+  name: 'discord_get_channel',
+  description: 'Fetch metadata about a Discord channel: name, topic, type, parent category, nsfw flag.',
+  parallelSafe: true,
+  input_schema: {
+    type: 'object',
+    properties: { channel_id: { type: 'string' } },
+    required: ['channel_id'],
+  },
+};
+
+export async function execute({ client }, { channel_id }) {
+  try {
+    const ch = await client.getChannel(channel_id);
+    return JSON.stringify({ ok: true, channel: sanitize(ch) });
+  } catch (err) {
+    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+  }
 }

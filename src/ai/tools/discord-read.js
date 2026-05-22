@@ -17,27 +17,26 @@ function sanitize(msg) {
   };
 }
 
-export function createDiscordReadTool({ client }) {
-  return {
-    name: 'discord_read',
-    description:
-      'Read the full content of a specific Discord message. Use when you need a referenced message that is not in your buffer.',
-    parallelSafe: true,
-    input_schema: {
-      type: 'object',
-      properties: {
-        channel_id: { type: 'string' },
-        message_id: { type: 'string' },
-      },
-      required: ['channel_id', 'message_id'],
+export const definition = {
+  name: 'discord_read',
+  description:
+    'Read the full content of a specific Discord message. Use when you need a referenced message that is not in your buffer.',
+  parallelSafe: true,
+  input_schema: {
+    type: 'object',
+    properties: {
+      channel_id: { type: 'string' },
+      message_id: { type: 'string' },
     },
-    execute: async ({ channel_id, message_id }) => {
-      try {
-        const msg = await client.getMessage(channel_id, message_id);
-        return JSON.stringify({ ok: true, message: sanitize(msg) });
-      } catch (err) {
-        return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
-      }
-    },
-  };
+    required: ['channel_id', 'message_id'],
+  },
+};
+
+export async function execute({ client }, { channel_id, message_id }) {
+  try {
+    const msg = await client.getMessage(channel_id, message_id);
+    return JSON.stringify({ ok: true, message: sanitize(msg) });
+  } catch (err) {
+    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+  }
 }

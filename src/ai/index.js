@@ -1,15 +1,12 @@
-import createAgent from 'openrouter';
 import { ChannelAIRuntime } from './runtime.js';
-import { registerTools } from './tools/index.js';
+import { AgentPool } from './agent-pool.js';
 
 let runtime = null;
-let agent = null;
+let pool = null;
 
 export async function init(client) {
   if (runtime) return runtime;
   if (process.env.AI_NATURAL_MODE !== '1') return null;
-
-  agent = await createAgent({ maxTurns: 0 });
 
   const config = {
     debounceMs: Number(process.env.AI_DEBOUNCE_MS) || 4000,
@@ -19,6 +16,7 @@ export async function init(client) {
     bufferSize: Number(process.env.AI_BUFFER_SIZE) || 30,
     compactThreshold: Number(process.env.AI_COMPACT_THRESHOLD) || 100,
     fetchHistoryMax: Number(process.env.AI_FETCH_HISTORY_MAX) || 50,
+    maxTurns: Number(process.env.OPENROUTER_MAX_TURNS) || 120,
   };
 
   const mutedChannelsResolver = async (guildId) => {
@@ -30,20 +28,21 @@ export async function init(client) {
     }
   };
 
-  const summarizer = async (messages) => {
-    const tmp = await createAgent({ maxTurns: 1 });
-    tmp.messages = [];
-    const body = messages
-      .map((m) => `[${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
-      .join('\n');
-    return await tmp.run(
-      `Summarize the following conversation segment in 6-12 lines. Preserve names, actions, and unresolved threads. No preamble.\n\n${body}`,
-    );
-  };
+  // The runtime is created first so the pool's ChildHandles can call back
+  // into it (onAgentCharge / onAgentMessages); pool is attached right after.
+  runtime = new ChannelAIRuntime({ client, pool: null, config, mutedChannelsResolver });
 
-  runtime = new ChannelAIRuntime({ client, agent, config, mutedChannelsResolver, summarizer });
-  registerTools(agent, { client, runtime });
+  pool = new AgentPool({
+    ctx: { client, runtime },
+    logger: client.logger,
+    idleMs: Number(process.env.AI_AGENT_IDLE_MS) || 300_000,
+    maxChildren: Number(process.env.AI_MAX_AGENTS) || 16,
+    respawnCooldownMs: Number(process.env.AI_AGENT_RESPAWN_COOLDOWN_MS) || 30_000,
+  });
+  runtime.pool = pool;
+
   client.aiRuntime = runtime;
+  client.aiPool = pool;
   client.logger?.info?.(`AI natural mode enabled as ${runtime.identity.name}`);
   return runtime;
 }

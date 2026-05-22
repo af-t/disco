@@ -26,8 +26,6 @@ const execute = async (client, message, _, args) => {
   try {
     await rt.invoke({
       mode: 'command',
-      contextKey: `cmd:${message.guild_id ?? 'dm'}:${message.author.id}`,
-      forceRespond: true,
       msg: message,
       explicitPrompt: rawArgs,
     });

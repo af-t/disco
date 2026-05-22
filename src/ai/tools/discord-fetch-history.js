@@ -12,32 +12,31 @@ function sanitize(msg) {
   };
 }
 
-export function createDiscordFetchHistoryTool({ client, runtime }) {
-  const hardMax = runtime?.config?.fetchHistoryMax ?? 50;
-  return {
-    name: 'discord_fetch_history',
-    description:
-      'Fetch recent messages from a Discord channel (older than your rolling buffer). Use sparingly — only when needed for context.',
-    parallelSafe: true,
-    input_schema: {
-      type: 'object',
-      properties: {
-        channel_id: { type: 'string' },
-        before_message_id: { type: 'string', description: 'Optional. Fetch messages older than this ID.' },
-        limit: { type: 'number', description: `Default ${DEFAULT_LIMIT}, max ${hardMax}.` },
-      },
-      required: ['channel_id'],
+export const definition = {
+  name: 'discord_fetch_history',
+  description:
+    'Fetch recent messages from a Discord channel (older than your rolling buffer). Use sparingly — only when needed for context.',
+  parallelSafe: true,
+  input_schema: {
+    type: 'object',
+    properties: {
+      channel_id: { type: 'string' },
+      before_message_id: { type: 'string', description: 'Optional. Fetch messages older than this ID.' },
+      limit: { type: 'number', description: `Default ${DEFAULT_LIMIT}; the channel runtime caps the maximum.` },
     },
-    execute: async ({ channel_id, before_message_id, limit }) => {
-      try {
-        const n = Math.min(Math.max(1, limit ?? DEFAULT_LIMIT), hardMax);
-        const qs = new URLSearchParams({ limit: String(n) });
-        if (before_message_id) qs.set('before', before_message_id);
-        const msgs = await client.makeRequest('GET', `/channels/${channel_id}/messages?${qs.toString()}`);
-        return JSON.stringify({ ok: true, messages: msgs.map(sanitize) });
-      } catch (err) {
-        return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
-      }
-    },
-  };
+    required: ['channel_id'],
+  },
+};
+
+export async function execute({ client, runtime }, { channel_id, before_message_id, limit }) {
+  try {
+    const hardMax = runtime?.config?.fetchHistoryMax ?? 50;
+    const n = Math.min(Math.max(1, limit ?? DEFAULT_LIMIT), hardMax);
+    const qs = new URLSearchParams({ limit: String(n) });
+    if (before_message_id) qs.set('before', before_message_id);
+    const msgs = await client.makeRequest('GET', `/channels/${channel_id}/messages?${qs.toString()}`);
+    return JSON.stringify({ ok: true, messages: msgs.map(sanitize) });
+  } catch (err) {
+    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+  }
 }

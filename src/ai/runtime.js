@@ -3,7 +3,6 @@ import path from 'node:path';
 import { snapshotFromMessage, renderEventBlock } from './event-format.js';
 import { prefilter } from './prefilter.js';
 import { createBudget } from './budget.js';
-import { shouldCompact, compact } from './compactor.js';
 import { buildSystemPrompt, buildTurnInjector, buildCommandSystemPrompt } from './prompt.js';
 
 function sanitizeFilename(name) {
@@ -21,6 +20,7 @@ const DEFAULT_CONFIG = {
   compactThreshold: 100,
   keepTail: 10,
   fetchHistoryMax: 50,
+  maxTurns: 120,
 };
 
 function collectImageBlocks(snapshots) {
@@ -50,10 +50,6 @@ function newChannelState() {
     rollingBuffer: [],
     pendingMsgs: [],
     debounceTimer: null,
-    llmActive: false,
-    rerunAfter: false,
-    pendingForceRespond: false,
-    agentMessages: [],
     cooldownUntil: 0,
     lastBotMsgAt: 0,
     channelName: null,
@@ -61,9 +57,9 @@ function newChannelState() {
 }
 
 export class ChannelAIRuntime {
-  constructor({ client, agent, config = {}, mutedChannelsResolver, summarizer, fetcher, workspaceRoot }) {
+  constructor({ client, pool, config = {}, mutedChannelsResolver, fetcher, workspaceRoot }) {
     this.client = client;
-    this.agent = agent;
+    this.pool = pool;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.channels = new Map();
     this.identity = { id: client._session?.user?.id, name: client._session?.user?.username };
@@ -71,10 +67,9 @@ export class ChannelAIRuntime {
     this.systemPrompt = buildSystemPrompt({ botUsername: this.identity.name ?? 'Bot' });
     this.budget = createBudget({ store: client.store, limit: this.config.dailyLimit });
     this.mutedChannelsResolver = mutedChannelsResolver ?? (async () => []);
-    this.summarizer = summarizer ?? (async () => '(no summarizer)');
     this.fetcher = fetcher ?? ((url) => fetch(url));
     this.workspaceRoot = workspaceRoot ?? path.join(process.cwd(), 'workspaces');
-    this._agentChain = Promise.resolve();
+    this._agentGuild = new Map();
     this._installCleanupHook();
   }
 
@@ -195,7 +190,26 @@ export class ChannelAIRuntime {
       });
     } catch {}
 
+    const channelKey = `channel:${msg.channel_id}`;
     const muted = msg.guild_id ? await this.mutedChannelsResolver(msg.guild_id) : [];
+
+    // Steering path: the channel's child is already running. Inject the new
+    // message into the live loop immediately, skipping the debounce. Only
+    // hard-drops (muted channel, exhausted budget) suppress steering.
+    if (this.pool.isRunning(channelKey)) {
+      if (muted.includes(msg.channel_id)) return;
+      if (msg.guild_id && (await this.budget.exhausted(msg.guild_id))) return;
+      const channelName = s.channelName ?? msg.channel_id;
+      const block = renderEventBlock(snap, { channel_name: channelName, channel_id: msg.channel_id });
+      for (const observed of s.rollingBuffer) observed.flag = 'observed';
+      s.pendingMsgs = [];
+      this._dispatch(channelKey, msg.channel_id, msg.guild_id ?? null, block).catch((err) =>
+        this.client.logger?.error?.('AI steer dispatch error', err),
+      );
+      return;
+    }
+
+    // Idle path: heuristic prefilter, then debounce a flush.
     const decision = prefilter(msg, {
       selfId: this.identity.id,
       selfMention: this.identity.mention,
@@ -205,16 +219,12 @@ export class ChannelAIRuntime {
     });
 
     if (decision === 'drop') return;
-    if (decision === 'pass-immediate') {
-      this._scheduleFlush(msg.channel_id, this.config.forceDebounceMs, true);
-    } else {
-      this._scheduleFlush(msg.channel_id, this.config.debounceMs, false);
-    }
+    const delay = decision === 'pass-immediate' ? this.config.forceDebounceMs : this.config.debounceMs;
+    this._scheduleFlush(msg.channel_id, delay);
   }
 
-  _scheduleFlush(channelId, delay, forceRespond) {
+  _scheduleFlush(channelId, delay) {
     const s = this._state(channelId);
-    if (forceRespond) s.pendingForceRespond = true;
     if (s.debounceTimer) clearTimeout(s.debounceTimer);
     s.debounceTimer = setTimeout(
       () => this._flush(channelId).catch((err) => this.client.logger?.error?.('AI flush error', err)),
@@ -222,69 +232,43 @@ export class ChannelAIRuntime {
     );
   }
 
-  async _runAgent(messages, prompt, systemPromptOverride) {
-    const prev = this._agentChain;
-    let release;
-    const next = new Promise((resolve) => {
-      release = resolve;
-    });
-    this._agentChain = next;
+  async _flush(channelId) {
+    const s = this._state(channelId);
+    const sample = s.pendingMsgs[0];
+    if (!sample) return;
+
+    const guildId = sample.guild_id ?? (await this._guildOf(channelId));
+    if (guildId && (await this.budget.exhausted(guildId))) {
+      s.pendingMsgs = [];
+      return;
+    }
+
+    const promptBlock = await this._composeUserPrompt(channelId, s);
+    const imageBlocks = collectImageBlocks(s.pendingMsgs);
+    const content = imageBlocks.length ? [{ type: 'text', text: promptBlock }, ...imageBlocks] : promptBlock;
+
+    for (const snap of s.rollingBuffer) snap.flag = 'observed';
+    s.pendingMsgs = [];
+
     try {
-      await prev;
-      this.agent.messages = messages;
-      this.agent.systemPrompt = systemPromptOverride ?? this.systemPrompt;
-      await this.agent.run(prompt);
-      return this.agent.messages;
-    } finally {
-      release();
+      await this._dispatch(`channel:${channelId}`, channelId, guildId, content);
+    } catch (err) {
+      this.client.logger?.error?.('AI flush failure', err);
     }
   }
 
-  async _flush(channelId) {
-    const s = this._state(channelId);
-    if (s.llmActive) {
-      s.rerunAfter = true;
-      return;
-    }
-    s.llmActive = true;
-    const forceRespond = s.pendingForceRespond;
-    s.pendingForceRespond = false;
-
-    try {
-      const sample = s.pendingMsgs[0];
-      const guildId = sample?.guild_id ?? (await this._guildOf(channelId));
-      if (guildId && !forceRespond && (await this.budget.exhausted(guildId))) {
-        s.pendingMsgs = [];
-        return;
-      }
-
-      const promptBlock = await this._composeUserPrompt(channelId, s);
-      const imageBlocks = collectImageBlocks(s.pendingMsgs);
-      const runInput = imageBlocks.length ? [{ type: 'text', text: promptBlock }, ...imageBlocks] : promptBlock;
-      s.agentMessages = await this._runAgent(s.agentMessages, runInput);
-
-      if (shouldCompact(s.agentMessages, this.config.compactThreshold)) {
-        s.agentMessages = await compact(s.agentMessages, {
-          keepTail: this.config.keepTail,
-          summarizer: this.summarizer,
-        });
-        // compact is its own LLM call, charged separately
-        if (guildId) await this.budget.increment(guildId);
-      }
-      if (guildId) await this.budget.increment(guildId);
-
-      for (const snap of s.rollingBuffer) snap.flag = 'observed';
-      s.pendingMsgs = [];
-    } catch (err) {
-      this.client.logger?.error?.('AI flush failure', err);
-      s.pendingMsgs = [];
-    } finally {
-      s.llmActive = false;
-      if (s.rerunAfter || s.pendingMsgs.length > 0) {
-        s.rerunAfter = false;
-        this._scheduleFlush(channelId, this.config.debounceMs, false);
-      }
-    }
+  async _dispatch(channelKey, channelId, guildId, content) {
+    if (guildId) this._agentGuild.set(channelKey, guildId);
+    const spawnContext = {
+      mode: 'natural',
+      systemPrompt: this.systemPrompt,
+      maxTurns: this.config.maxTurns,
+      compactThreshold: this.config.compactThreshold,
+      keepTail: this.config.keepTail,
+      workspaceDir: path.join(this.workspaceRoot, `channel-${channelId}`),
+      history: null,
+    };
+    await this.pool.run(channelKey, content, spawnContext);
   }
 
   async _guildOf(channelId) {
@@ -296,71 +280,84 @@ export class ChannelAIRuntime {
     }
   }
 
-  async invoke({ mode, contextKey, forceRespond: _forceRespond, msg, explicitPrompt }) {
-    const stateKey = contextKey ?? msg.channel_id;
-    const s = this._state(stateKey);
-    if (mode === 'command') {
-      if (s.llmActive) {
-        s.rerunAfter = true;
-        s.pendingForceRespond = true;
-        return;
+  async invoke({ mode, msg, explicitPrompt }) {
+    if (mode !== 'command') throw new Error(`Unknown invoke mode: ${mode}`);
+
+    const guildPart = msg.guild_id ?? 'dm';
+    const userId = msg.author?.id ?? 'unknown';
+    const agentKey = `command:${guildPart}:${userId}`;
+    const sessionKey = `session:openrouter:${guildPart}:${userId}`;
+
+    let history = null;
+    try {
+      const persisted = await this.client.store.get(sessionKey);
+      if (Array.isArray(persisted)) history = persisted;
+    } catch {}
+
+    const userTag = msg.author?.global_name || msg.author?.username || 'user';
+    const cmdWorkspaceDir = path.join(this.workspaceRoot, `command-${guildPart}-${userId}`);
+    const savedFiles = await this._saveNonImageAttachments(msg.attachments, msg.id, cmdWorkspaceDir);
+    const workspaceHint = savedFiles.length
+      ? [
+          '[Workspace files (use the Read tool with the absolute path):',
+          ...savedFiles.map((f) => `  - ${f.original} (${f.content_type}) -> ${f.saved_path}`),
+          ']',
+        ].join('\n')
+      : null;
+    const block = [
+      `[Direct invocation from ${userTag} (user_id=${userId})]`,
+      `[Context: channel_id=${msg.channel_id}, message_id=${msg.id}, guild_id=${msg.guild_id ?? 'DM'}, current_time=${new Date().toISOString()}]`,
+      `[Reply via discord_reply with channel_id="${msg.channel_id}" and message_id="${msg.id}". Do not skip — the user explicitly asked.]`,
+      workspaceHint,
+      '',
+      explicitPrompt ?? msg.content ?? '',
+    ]
+      .filter((line) => line !== null)
+      .join('\n');
+
+    const imageBlocks = collectImageBlocksFromRawAttachments(msg.attachments);
+    const content = imageBlocks.length ? [{ type: 'text', text: block }, ...imageBlocks] : block;
+
+    this._agentGuild.set(agentKey, msg.guild_id ?? null);
+    const spawnContext = {
+      mode: 'command',
+      systemPrompt: buildCommandSystemPrompt({ botUsername: this.identity.name ?? 'Bot', userTag }),
+      maxTurns: this.config.maxTurns,
+      compactThreshold: this.config.compactThreshold,
+      keepTail: this.config.keepTail,
+      workspaceDir: cmdWorkspaceDir,
+      history,
+    };
+
+    try {
+      const done = await this.pool.run(agentKey, content, spawnContext);
+      if (done?.outcome === 'truncated') {
+        await this.client
+          .reply(msg, '⚠️ Run hit the turn limit — send another message to continue where it left off.')
+          .catch(() => {});
       }
-
-      // spec 4.4: command sessions persist across restart
-      const sessionKey = `session:openrouter:${msg.guild_id ?? 'dm'}:${msg.author?.id ?? 'unknown'}`;
-      if (s.agentMessages.length === 0) {
-        try {
-          const persisted = await this.client.store.get(sessionKey);
-          if (Array.isArray(persisted)) s.agentMessages = persisted;
-        } catch {}
-      }
-
-      const promptBody = explicitPrompt ?? msg.content ?? '';
-      const userTag = msg.author?.global_name || msg.author?.username || 'user';
-      const guildPart = msg.guild_id ? `guild_id=${msg.guild_id}` : 'guild_id=DM';
-      const cmdWorkspaceDir = path.join(
-        this.workspaceRoot,
-        `command-${msg.guild_id ?? 'dm'}-${msg.author?.id ?? 'unknown'}`,
-      );
-      const savedFiles = await this._saveNonImageAttachments(msg.attachments, msg.id, cmdWorkspaceDir);
-      const workspaceHint = savedFiles.length
-        ? [
-            '[Workspace files (use the Read tool with the absolute path):',
-            ...savedFiles.map((f) => `  - ${f.original} (${f.content_type}) -> ${f.saved_path}`),
-            ']',
-          ].join('\n')
-        : null;
-      const block = [
-        `[Direct invocation from ${userTag} (user_id=${msg.author?.id ?? 'unknown'})]`,
-        `[Context: channel_id=${msg.channel_id}, message_id=${msg.id}, ${guildPart}, current_time=${new Date().toISOString()}]`,
-        `[Reply via discord_reply with channel_id="${msg.channel_id}" and message_id="${msg.id}". Do not skip — the user explicitly asked.]`,
-        workspaceHint,
-        '',
-        promptBody,
-      ]
-        .filter((line) => line !== null)
-        .join('\n');
-
-      const imageBlocks = collectImageBlocksFromRawAttachments(msg.attachments);
-      const runInput = imageBlocks.length ? [{ type: 'text', text: block }, ...imageBlocks] : block;
-
-      s.llmActive = true;
-      s.pendingForceRespond = false;
-      try {
-        const commandPrompt = buildCommandSystemPrompt({ botUsername: this.identity.name ?? 'Bot', userTag });
-        s.agentMessages = await this._runAgent(s.agentMessages, runInput, commandPrompt);
-        try {
-          await this.client.store.set(sessionKey, s.agentMessages, { isCache: true, ttl: 2 * 60 * 60 * 1000 });
-        } catch {}
-        if (msg.guild_id) await this.budget.increment(msg.guild_id);
-      } catch (err) {
-        this.client.logger?.error?.('AI command invoke failure', err);
-      } finally {
-        s.llmActive = false;
-      }
-      return;
+    } catch (err) {
+      this.client.logger?.error?.('AI command invoke failure', err);
+      await this.client.reply(msg, 'Sorry, something went wrong.').catch(() => {});
     }
-    throw new Error(`Unknown invoke mode: ${mode}`);
+  }
+
+  // Called by ChildHandle when a child signals a budget charge.
+  async onAgentCharge(agentKey, _kind) {
+    const guildId = this._agentGuild.get(agentKey);
+    if (guildId) await this.budget.increment(guildId);
+  }
+
+  // Called by ChildHandle when a command-mode child returns its messages.
+  async onAgentMessages(agentKey, messages) {
+    if (!agentKey.startsWith('command:')) return;
+    const rest = agentKey.slice('command:'.length);
+    try {
+      await this.client.store.set(`session:openrouter:${rest}`, messages, {
+        isCache: true,
+        ttl: 2 * 60 * 60 * 1000,
+      });
+    } catch {}
   }
 
   async _composeUserPrompt(channelId, state) {

@@ -1,6 +1,6 @@
 {
   "name": "disco",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Discord bot application.",
   "main": "src/index.js",
   "type": "module",
@@ -34,7 +34,7 @@
   "homepage": "https://github.com/af-t/disco#readme",
   "dependencies": {
     "dotenv": "^17.4.2",
-    "openrouter": "github:af-t/openrouter#v1.0.5",
+    "openrouter": "github:af-t/openrouter#v1.2.0",
     "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.20.0"
