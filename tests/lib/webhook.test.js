@@ -2,6 +2,9 @@ import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import https from 'node:https';
 import EventEmitter from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import DiscordWebhookTools from '../../src/lib/webhook.js';
 
 const VALID_URL = 'https://discord.com/api/webhooks/123/abc';
@@ -294,5 +297,91 @@ describe('DiscordWebhookTools signature', () => {
     const sig1 = tools.generateSignature(ts, body, secret);
     const sig2 = tools.generateSignature(ts, JSON.stringify(body), secret);
     assert.strictEqual(sig1, sig2);
+  });
+});
+
+describe('DiscordWebhookTools sendFile extra coverage', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('uploads a file referenced by a filesystem path', async () => {
+    const tmp = path.join(os.tmpdir(), 'wh-file-' + Date.now() + '.txt');
+    fs.writeFileSync(tmp, 'disk-file-content');
+    mock.method(https, 'request', (options, callback) => {
+      const req = new EventEmitter();
+      req.write = () => true;
+      req.destroy = () => {};
+      req.end = () =>
+        setImmediate(() => {
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          res.headers = {};
+          callback(res);
+          res.emit('data', Buffer.from('{"id":"f1"}'));
+          res.emit('end');
+        });
+      return req;
+    });
+    try {
+      const results = await new DiscordWebhookTools(VALID_URL).sendFile([tmp]);
+      assert.ok(Array.isArray(results));
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  it('recurses for batches larger than 10 files', async () => {
+    mock.method(https, 'request', (options, callback) => {
+      const req = new EventEmitter();
+      req.write = () => true;
+      req.destroy = () => {};
+      req.end = () =>
+        setImmediate(() => {
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          res.headers = {};
+          callback(res);
+          res.emit('data', Buffer.from('{}'));
+          res.emit('end');
+        });
+      return req;
+    });
+    const files = [];
+    for (let i = 0; i < 12; i++) files.push({ filename: `f${i}.txt`, data: Buffer.from('x') });
+    const results = await new DiscordWebhookTools(VALID_URL).sendFile(files);
+    assert.ok(Array.isArray(results));
+  });
+
+  it('pushes the raw string when a file response is not JSON', async () => {
+    mock.method(https, 'request', (options, callback) => {
+      const req = new EventEmitter();
+      req.write = () => true;
+      req.destroy = () => {};
+      req.end = () =>
+        setImmediate(() => {
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          res.headers = {};
+          callback(res);
+          res.emit('data', Buffer.from('not-json-here'));
+          res.emit('end');
+        });
+      return req;
+    });
+    const results = await new DiscordWebhookTools(VALID_URL).sendFile([{ filename: 'a.txt', data: Buffer.from('x') }]);
+    assert.ok(results.includes('not-json-here'));
+  });
+
+  it('rejects when a sendFile request times out', async () => {
+    mock.method(https, 'request', () => {
+      const req = new EventEmitter();
+      req.write = () => true;
+      req.destroy = () => {};
+      req.end = () => setImmediate(() => req.emit('timeout'));
+      return req;
+    });
+    await assert.rejects(
+      () => new DiscordWebhookTools(VALID_URL).sendFile([{ filename: 'a.txt', data: Buffer.from('x') }]),
+      /Request timeout/,
+    );
   });
 });

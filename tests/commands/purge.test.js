@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert';
 
 // We import the module function directly
@@ -179,4 +179,54 @@ test('purge should use bulk delete for multiple messages', async () => {
   await purgeModule.execute(client, msg, ['5']);
   // Should have bulk deleted at least once
   assert.ok(bulkDeleteCalls.length > 0, 'Bulk delete should be called for chunks > 1');
+});
+
+describe('purge notice and auto-delete failures', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('logs a warning when the purge-limit notice reply fails', async () => {
+    const warns = [];
+    const client = createMockClient({ messages: [] });
+    client.logger.warn = (...a) => warns.push(a);
+    client.reply = async (m, content) => {
+      if (typeof content === 'string' && content.includes('limited to')) throw new Error('reply failed');
+      return { id: 'reply_001', channel_id: m.channel_id };
+    };
+
+    await purgeModule.execute(client, createMockMessage(), ['5000']);
+    // the .catch handler runs as a microtask
+    await new Promise((r) => setImmediate(r));
+    assert.ok(warns.some((w) => w.some((a) => typeof a === 'string' && a.includes('purge limit notice'))));
+  });
+
+  it('logs a warning when auto-deleting the purge feedback fails', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const warns = [];
+    const messages = [{ id: '800000000000000001', timestamp: new Date().toISOString() }];
+    const client = createMockClient({ messages });
+    client.logger.warn = (...a) => warns.push(a);
+    client.deleteMessage = async () => {
+      throw new Error('delete failed');
+    };
+
+    await purgeModule.execute(client, createMockMessage(), ['5']);
+    mock.timers.tick(3500);
+    await new Promise((r) => setImmediate(r));
+    assert.ok(warns.some((w) => w.some((a) => typeof a === 'string' && a.includes('auto-delete purge feedback'))));
+  });
+
+  it('paginates message_reference mode across a full 100-message page', async () => {
+    const messages = [];
+    for (let i = 0; i < 100; i++) {
+      messages.push({ id: `80000000000${String(i).padStart(7, '0')}`, timestamp: new Date().toISOString() });
+    }
+    const bulkDeleteCalls = [];
+    const client = createMockClient({ messages, bulkDeleteCalls });
+    const msg = createMockMessage({ message_reference: { message_id: '700000000000000000' } });
+    await purgeModule.execute(client, msg, []);
+    assert.ok(bulkDeleteCalls.length > 0);
+  });
 });

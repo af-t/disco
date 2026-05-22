@@ -483,3 +483,76 @@ describe('StoreEngine _saveMetadata error is swallowed', () => {
     }
   });
 });
+
+describe('StoreManager argument and lifecycle guards', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('uses the default disk path when none is configured', () => {
+    const engine = new Engine();
+    assert.ok(engine.diskPath.endsWith(join('storage', 'db')));
+  });
+
+  it('ready() is idempotent', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_ready2_' + Date.now());
+    const engine = new Engine({ diskPath });
+    await engine.ready();
+    await engine.ready(); // second call returns early
+    assert.strictEqual(engine._active, true);
+    await engine.close();
+    await fs.rm(diskPath, { recursive: true, force: true });
+  });
+
+  it('close() returns false when the store was never started', async () => {
+    const engine = new Engine({ diskPath: join(os.tmpdir(), 'engine_noclose_' + Date.now()) });
+    assert.strictEqual(await engine.close(), false);
+  });
+
+  it('rejects non-string keys for set/get/delete/has/metadata', async () => {
+    const engine = new Engine({ diskPath: join(os.tmpdir(), 'engine_keyguard_' + Date.now()) });
+    await assert.rejects(() => engine.set(1, 'v'), TypeError);
+    await assert.rejects(() => engine.get(1), TypeError);
+    await assert.rejects(() => engine.delete(1), TypeError);
+    await assert.rejects(() => engine.has(1), TypeError);
+    await assert.rejects(() => engine.metadata(1), TypeError);
+  });
+
+  it('getStats returns defaults for an empty store', async () => {
+    const engine = new Engine({ diskPath: join(os.tmpdir(), 'engine_emptystats_' + Date.now()) });
+    const stats = await engine.getStats();
+    assert.strictEqual(stats.storage.totalItems, 0);
+    assert.strictEqual(stats.cache.hitRate, '0.00%');
+    assert.strictEqual(stats.queue.avg, '0.00');
+  });
+
+  it('metadata returns an empty object for a missing key', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_missmeta_' + Date.now());
+    const engine = new Engine({ diskPath });
+    await engine.ready();
+    try {
+      assert.deepStrictEqual(await engine.metadata('nope'), {});
+    } finally {
+      await engine.close();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+
+  it('_demote is a no-op for a missing key', async () => {
+    const engine = new Engine({ diskPath: join(os.tmpdir(), 'engine_demotemiss_' + Date.now()) });
+    await engine._demote('ghost'); // must not throw
+  });
+
+  it('promotes a custom-TTL key back from disk', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_customttl_' + Date.now());
+    const engine = new Engine({ diskPath });
+    await engine.ready();
+    try {
+      await engine.set('ck', { v: 1 }, { isCache: true, ttl: 60_000 });
+      await engine._demote('ck');
+      assert.strictEqual(engine._metadata.get('ck').location, 1);
+      assert.deepStrictEqual(await engine.get('ck'), { v: 1 });
+    } finally {
+      await engine.close();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+});

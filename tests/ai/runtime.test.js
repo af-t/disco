@@ -954,3 +954,212 @@ describe('ChannelAIRuntime _guildOf', () => {
     assert.strictEqual(result, null);
   });
 });
+
+describe('ChannelAIRuntime extra coverage', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('constructor falls back to an unknown identity without a session user', () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubClient._session = {};
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    assert.strictEqual(rt.identity.mention, '<@unknown>');
+    assert.match(rt.systemPrompt, /You are Bot/);
+  });
+
+  it('cleanup hook logs when workspace cleanup throws', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const warns = [];
+    stubClient.logger.warn = (...a) => warns.push(a);
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_handleStoreDelete', async () => {
+      throw new Error('cleanup boom');
+    });
+    await stubClient.store.onDelete('channel:buffer:c1', null);
+    assert.ok(warns.some((w) => w.some((a) => typeof a === 'string' && a.includes('workspace cleanup failed'))));
+  });
+
+  it('_handleStoreDelete ignores session keys with an empty guild or user part', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const rmCalls = [];
+    mock.method(fs, 'rm', async (d) => {
+      rmCalls.push(d);
+    });
+    await rt._handleStoreDelete('session:openrouter::u1');
+    await rt._handleStoreDelete('session:openrouter:g1:');
+    assert.strictEqual(rmCalls.length, 0);
+  });
+
+  it('_saveNonImageAttachments skips when the fetch response is not ok', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({
+      client: stubClient,
+      agent: stubAgent,
+      fetcher: async () => ({ ok: false }),
+    });
+    const dir = path.join(os.tmpdir(), 'rt-notok-' + Date.now());
+    const result = await rt._saveNonImageAttachments(
+      [{ url: 'http://x/d.pdf', content_type: 'application/pdf', filename: 'd.pdf' }],
+      'm1',
+      dir,
+    );
+    assert.deepStrictEqual(result, []);
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('onMessage trims the rolling buffer to bufferSize', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent, config: { bufferSize: 2 } });
+    mock.method(rt, '_scheduleFlush', () => {});
+    for (let i = 0; i < 4; i++) {
+      await rt.onMessage({
+        id: `m${i}`,
+        channel_id: 'c1',
+        guild_id: 'g1',
+        author: { id: 'u1' },
+        content: `t${i}`,
+        attachments: [],
+      });
+    }
+    assert.strictEqual(rt._state('c1').rollingBuffer.length, 2);
+  });
+
+  it('onMessage swallows a store.set failure', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubClient.store.set = async () => {
+      throw new Error('store down');
+    };
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_scheduleFlush', () => {});
+    await rt.onMessage({
+      id: 'm1',
+      channel_id: 'c1',
+      guild_id: 'g1',
+      author: { id: 'u1' },
+      content: 'hi',
+      attachments: [],
+    });
+    assert.strictEqual(rt._state('c1').pendingMsgs.length, 1);
+  });
+
+  it('onMessage in a DM skips muted-channel and budget checks', async () => {
+    const { stubClient, stubAgent, calls } = makeStubs();
+    const rt = new ChannelAIRuntime({
+      client: stubClient,
+      agent: stubAgent,
+      config: { debounceMs: 10, forceDebounceMs: 5 },
+    });
+    await rt.onMessage({ id: 'm1', channel_id: 'dm1', author: { id: 'u1' }, content: 'hello', attachments: [] });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(calls.run, 1);
+  });
+
+  it('_flush compacts agent history past the threshold', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({
+      client: stubClient,
+      agent: stubAgent,
+      config: { compactThreshold: 1, keepTail: 1 },
+    });
+    mock.method(rt.budget, 'exhausted', async () => false);
+    const incSpy = mock.method(rt.budget, 'increment', async () => {});
+    mock.method(rt, '_runAgent', async () => [
+      { role: 'user', content: 'a' },
+      { role: 'assistant', content: 'b' },
+      { role: 'user', content: 'c' },
+    ]);
+    const snap = {
+      guild_id: 'g1',
+      channel_id: 'c1',
+      flag: 'new',
+      content: 'hi',
+      attachments_meta: [],
+      id: 'm1',
+      author_id: 'u1',
+      author_name: 'u',
+      reply_to: null,
+      timestamp: Date.now(),
+    };
+    const s = rt._state('c1');
+    s.pendingMsgs.push(snap);
+    s.rollingBuffer.push(snap);
+    await rt._flush('c1');
+    assert.strictEqual(incSpy.mock.callCount(), 2); // compact charge + normal turn
+  });
+
+  it('_guildOf returns null when the channel has no guild', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubClient.getChannel = async (id) => ({ id, name: 'x' });
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    assert.strictEqual(await rt._guildOf('c1'), null);
+  });
+
+  it('invoke command mode tolerates a missing author id and empty prompt', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_runAgent', async () => []);
+    mock.method(rt.budget, 'increment', async () => {});
+    await rt.invoke({
+      mode: 'command',
+      msg: { id: 'm1', channel_id: 'c1', guild_id: 'g1', author: {}, attachments: [] },
+    });
+    assert.strictEqual(rt._state('c1').llmActive, false);
+  });
+
+  it('invoke command mode uses the Bot fallback name without a session', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubClient._session = {};
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_runAgent', async () => []);
+    mock.method(rt.budget, 'increment', async () => {});
+    await rt.invoke({
+      mode: 'command',
+      msg: { id: 'm1', channel_id: 'c1', guild_id: 'g1', author: { id: 'u1' }, content: 'hi', attachments: [] },
+    });
+    assert.strictEqual(rt._state('c1').llmActive, false);
+  });
+
+  it('invoke command mode reuses non-empty agent history without reloading', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_runAgent', async (msgs) => msgs);
+    mock.method(rt.budget, 'increment', async () => {});
+    const s = rt._state('c1');
+    s.agentMessages = [{ role: 'user', content: 'seed' }];
+    await rt.invoke({
+      mode: 'command',
+      msg: { id: 'm1', channel_id: 'c1', guild_id: 'g1', author: { id: 'u1' }, content: 'hi', attachments: [] },
+    });
+    assert.ok(s.agentMessages.some((m) => m.content === 'seed'));
+  });
+
+  it('invoke command mode swallows a session-persist failure', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const realSet = stubClient.store.set;
+    stubClient.store.set = async (k, ...rest) => {
+      if (typeof k === 'string' && k.startsWith('session:openrouter:')) throw new Error('persist down');
+      return realSet(k, ...rest);
+    };
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_runAgent', async () => []);
+    mock.method(rt.budget, 'increment', async () => {});
+    await rt.invoke({
+      mode: 'command',
+      msg: { id: 'm1', channel_id: 'c1', guild_id: 'g1', author: { id: 'u1' }, content: 'hi', attachments: [] },
+    });
+    assert.strictEqual(rt._state('c1').llmActive, false);
+  });
+
+  it('_composeUserPrompt copes with a nameless channel and a getChannel failure', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    stubClient.getChannel = async (id) => ({ id });
+    const out1 = await rt._composeUserPrompt('c1', rt._state('c1'));
+    assert.match(out1, /channel_id=c1/);
+    stubClient.getChannel = async () => {
+      throw new Error('no channel');
+    };
+    const out2 = await rt._composeUserPrompt('c2', rt._state('c2'));
+    assert.strictEqual(typeof out2, 'string');
+  });
+});

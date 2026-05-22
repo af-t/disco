@@ -479,3 +479,35 @@ describe('StoreBase _startMaintainer', () => {
     }
   });
 });
+
+describe('StoreBase logger integration', () => {
+  it('wires a logger from config and uses it in _log', async () => {
+    const lines = [];
+    const fakeLogger = {
+      createLogger: () => ({
+        info: (...a) => lines.push(['info', ...a]),
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      }),
+    };
+    const s = new ConcreteStore({ logger: fakeLogger });
+    await s.resetStats(); // calls _log('info', ...)
+    assert.ok(lines.some((l) => l[0] === 'info'));
+  });
+
+  it('getStats counts in-memory items and their byte size', async () => {
+    const s = new ConcreteStore();
+    s._metadata.set('mem', { location: 0, dataSizeV8: 42 });
+    const stats = await s.getStats();
+    assert.strictEqual(stats.storage.itemsInMemory, 1);
+    assert.strictEqual(stats.storage.memoryUsageBytes.data, 42);
+  });
+
+  it('getStats reports a queue average once tasks have been enqueued', async () => {
+    const s = new ConcreteStore();
+    s._enqueueTask(async () => {});
+    const stats = await s.getStats();
+    assert.notStrictEqual(stats.queue.avg, '0.00');
+  });
+});

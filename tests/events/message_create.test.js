@@ -928,3 +928,115 @@ describe('message_create commands.ai fallback', () => {
     assert.strictEqual(aiCalls.length, 1);
   });
 });
+
+describe('message_create extra coverage', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('handles a naturalMode DM with no content', async () => {
+    const calls = [];
+    const client = createMockClient();
+    client.aiRuntime = { onMessage: async (m) => calls.push(m) };
+    await handleMessage(client, createMockMessage({ content: undefined, guild_id: undefined }));
+    assert.strictEqual(calls.length, 1);
+  });
+
+  it('handles a naturalMode DM that is just a bare prefix', async () => {
+    const client = createMockClient();
+    client.aiRuntime = { onMessage: async () => {} };
+    const result = await handleMessage(client, createMockMessage({ content: '.', guild_id: undefined }));
+    assert.strictEqual(result, undefined);
+  });
+
+  it('logs an error when naturalMode onMessage rejects', async () => {
+    const errors = [];
+    const client = createMockClient();
+    client.logger.error = (...a) => errors.push(a);
+    client.aiRuntime = {
+      onMessage: async () => {
+        throw new Error('runtime fail');
+      },
+    };
+    await handleMessage(client, createMockMessage({ content: 'hello there', guild_id: undefined }));
+    await new Promise((r) => setImmediate(r));
+    assert.ok(errors.length > 0);
+  });
+
+  it('warns when AFK welcome auto-delete fails and uses the username fallback', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const warns = [];
+    const sent = [];
+    const client = createMockClient();
+    client.logger.warn = (...a) => warns.push(a);
+    await client.store.set(`afk:${GUILD_ID}:${USER_001}`, { since: Date.now() - 1000, message: 'x' });
+    client.sendMessage = async (cid, content) => {
+      sent.push(content);
+      return { id: 'w', channel_id: cid };
+    };
+    client.deleteMessage = async () => {
+      throw new Error('delete failed');
+    };
+    const m = createMockMessage({ content: 'back now', author: { id: USER_001, username: 'PlainUser', bot: false } });
+    await handleMessage(client, m);
+    mock.timers.tick(5000);
+    await new Promise((r) => setImmediate(r));
+    assert.ok(sent.some((s) => s.includes('PlainUser')));
+    assert.ok(warns.some((w) => w.some((a) => typeof a === 'string' && a.includes('AFK welcome'))));
+  });
+
+  it('warns when AFK mention notice auto-delete fails', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const warns = [];
+    const OTHER = '999999999999999999';
+    const client = createMockClient();
+    client.logger.warn = (...a) => warns.push(a);
+    await client.store.set(`afk:${GUILD_ID}:${OTHER}`, { since: Date.now() - 1000, message: 'brb' });
+    client.sendMessage = async (cid) => ({ id: 'w', channel_id: cid });
+    client.deleteMessage = async () => {
+      throw new Error('delete failed');
+    };
+    await handleMessage(client, createMockMessage({ content: `yo <@${OTHER}> ping` }));
+    mock.timers.tick(10000);
+    await new Promise((r) => setImmediate(r));
+    assert.ok(warns.some((w) => w.some((a) => typeof a === 'string' && a.includes('AFK mention'))));
+  });
+
+  it('warns when anti-link warning auto-delete fails', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const warns = [];
+    const client = createMockClient();
+    client.logger.warn = (...a) => warns.push(a);
+    client.deleteMessage = async (cid, mid) => {
+      if (mid === 'warn-x') throw new Error('delete failed');
+    };
+    client.sendMessage = async () => ({ id: 'warn-x' });
+    client.getGuildMember = async () => ({ roles: [] });
+    client.getRoles = async () => [];
+    await handleMessage(client, createMockMessage({ content: 'spam http://evil.example.com' }));
+    mock.timers.tick(5000);
+    await new Promise((r) => setImmediate(r));
+    assert.ok(warns.some((w) => w.some((a) => typeof a === 'string' && a.includes('link warning'))));
+  });
+
+  it('drops silently after a rate-limit notice and uses the username fallback', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const replies = [];
+    const client = createMockClient({ hasCommands: { ping: async () => {} } });
+    client.sendMessage = async (cid, content) => {
+      replies.push(typeof content === 'string' ? content : '');
+      return { id: 'r' };
+    };
+    client.deleteMessage = async () => {};
+    for (let i = 0; i < 8; i++) {
+      await handleMessage(
+        client,
+        createMockMessage({ content: `.ping x${i}`, author: { id: USER_001, username: 'NoNick', bot: false } }),
+      );
+    }
+    const notices = replies.filter((r) => r.includes('slow down'));
+    assert.strictEqual(notices.length, 1);
+    assert.ok(notices[0].includes('NoNick'));
+  });
+});

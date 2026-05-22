@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { snapshotFromMessage, renderEventBlock } from '../../src/ai/event-format.js';
 
@@ -59,4 +59,62 @@ test('renderEventBlock encodes attachments compactly', () => {
   };
   const out = renderEventBlock(snap, { channel_name: 'g', channel_id: 'c' });
   assert.match(out, /attachments="image:a\.png; pdf:b\.pdf"/);
+});
+
+describe('event-format fallbacks', () => {
+  it('snapshotFromMessage uses fallbacks for missing fields', () => {
+    const snap = snapshotFromMessage({ id: 'm1' });
+    assert.strictEqual(snap.author_id, 'unknown');
+    assert.strictEqual(snap.author_name, 'unknown');
+    assert.strictEqual(snap.content, '');
+    assert.strictEqual(snap.reply_to, null);
+    assert.deepStrictEqual(snap.attachments_meta, []);
+    assert.strictEqual(snap.flag, 'observed');
+  });
+
+  it('snapshotFromMessage defaults a missing attachment content_type', () => {
+    const snap = snapshotFromMessage({ id: 'm1', attachments: [{ filename: 'blob' }] });
+    assert.strictEqual(snap.attachments_meta[0].content_type, 'application/octet-stream');
+  });
+
+  it('renderEventBlock classifies every short attachment type', () => {
+    const snap = {
+      id: '1',
+      author_id: 'u',
+      author_name: 'a',
+      content: '',
+      reply_to: null,
+      timestamp: 0,
+      flag: 'observed',
+      attachments_meta: [
+        { filename: 'a', content_type: 'audio/mpeg' },
+        { filename: 'v', content_type: 'video/mp4' },
+        { filename: 't', content_type: 'text/plain' },
+        { filename: 'p', content_type: 'application/pdf' },
+        { filename: 'n', content_type: undefined },
+        { filename: 'z', content_type: 'application/zip' },
+      ],
+    };
+    const out = renderEventBlock(snap, { channel_name: 'g', channel_id: 'c' });
+    assert.match(out, /audio:a/);
+    assert.match(out, /video:v/);
+    assert.match(out, /text:t/);
+    assert.match(out, /pdf:p/);
+    assert.match(out, /file:n/);
+    assert.match(out, /file:z/);
+  });
+
+  it('renderEventBlock falls back to OBSERVED for an unknown flag', () => {
+    const snap = {
+      id: '1',
+      author_id: 'u',
+      author_name: 'a',
+      content: '',
+      reply_to: null,
+      timestamp: 0,
+      flag: 'mystery',
+      attachments_meta: [],
+    };
+    assert.match(renderEventBlock(snap, { channel_name: 'g', channel_id: 'c' }), /flag="OBSERVED"/);
+  });
 });

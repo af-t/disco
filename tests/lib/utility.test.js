@@ -497,3 +497,78 @@ describe('deploySlashCommands hash-unchanged skip', () => {
     assert.strictEqual(putCalled, false);
   });
 });
+
+describe('utility extra coverage', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('Logger falls back to "unknown" for a non-string name', () => {
+    assert.strictEqual(new Logger(123).name, 'unknown');
+  });
+
+  it('importCommands rejects a non-string path', async () => {
+    await assert.rejects(() => importCommands(123), TypeError);
+  });
+
+  it('importEvents rejects a non-string path', async () => {
+    await assert.rejects(() => importEvents({ on: () => {} }, 123), TypeError);
+  });
+
+  it('importCommands exposes data fields as proxied getters', async () => {
+    const base = join(tmpdir(), 'util_proxy_' + Date.now());
+    await mkdir(base, { recursive: true });
+    await writeFile(
+      join(base, 'ping.js'),
+      `export default { data: { name: 'ping', description: 'Ping', usage: 'ping' }, execute: async () => {} };`,
+    );
+    try {
+      const commands = await importCommands(base);
+      assert.strictEqual(commands.ping.name, 'ping');
+      assert.strictEqual(commands.ping.usage, 'ping');
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('importCommands warns when a module has no default export', async () => {
+    const base = join(tmpdir(), 'util_nodefault_' + Date.now());
+    await mkdir(base, { recursive: true });
+    await writeFile(join(base, 'nodef.js'), `export const value = 1;`);
+    try {
+      const commands = await importCommands(base);
+      assert.deepStrictEqual(Object.keys(commands), []);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('importEvents skips subdirectories and no-default files', async () => {
+    const base = join(tmpdir(), 'util_evtdir_' + Date.now());
+    await mkdir(join(base, 'nested'), { recursive: true });
+    await writeFile(join(base, 'ready.js'), `export const x = 1;`);
+    const events = [];
+    const client = { on: (name) => events.push(name) };
+    try {
+      await importEvents(client, base);
+      assert.ok(events.includes('READY'));
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('deploySlashCommands logs a plural sync message for multiple commands', async () => {
+    let payload;
+    const client = {
+      _session: { application: { id: 'app1' } },
+      logger: { warn: () => {}, info: () => {}, error: () => {} },
+      store: { get: async () => 'stale-hash', set: async () => {} },
+      makeRequest: async (_m, _p, body) => {
+        payload = body;
+      },
+    };
+    await deploySlashCommands(client, {
+      ping: Object.assign(() => {}, { data: { name: 'ping', description: 'Ping', slash: true } }),
+      pong: Object.assign(() => {}, { data: { name: 'pong', description: 'Pong', slash: true } }),
+    });
+    assert.strictEqual(payload.length, 2);
+  });
+});

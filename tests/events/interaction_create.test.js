@@ -656,3 +656,156 @@ describe('interaction_create mockMessage shim', () => {
     assert.ok(errors.length > 0);
   });
 });
+
+describe('interaction_create extra coverage', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('autocomplete returns early when client.commands is missing', async () => {
+    const client = createMockClient();
+    client.commands = null;
+    const responses = [];
+    client.createInteractionResponse = async (...a) => responses.push(a);
+    await handleInteraction(client, {
+      id: 'i1',
+      token: 't',
+      type: 4,
+      data: { name: 'help', options: [{ name: 'command', focused: true, value: 'p' }] },
+    });
+    assert.strictEqual(responses.length, 0);
+  });
+
+  it('resolves the member via interaction.user when interaction.member is null', async () => {
+    const executed = [];
+    const client = createMockClient({
+      commands: {
+        ban: {
+          data: { name: 'ban', description: 'Ban', permissions: ['BAN_MEMBERS'] },
+          permissions: ['BAN_MEMBERS'],
+          execute: async () => executed.push(1),
+        },
+      },
+      guildMember: { roles: ['r1'] },
+      roles: [{ id: 'r1', permissions: '8' }],
+    });
+    client.createInteractionResponse = async () => {};
+    await handleInteraction(
+      client,
+      createMockInteraction({
+        data: { name: 'ban', options: [] },
+        member: null,
+        user: { id: USER_ID, username: 'ViaUser' },
+      }),
+    );
+    assert.strictEqual(executed.length, 1);
+  });
+
+  it('applies the HEAVY rate limit to AI slash commands', async () => {
+    let count = 0;
+    const client = createMockClient({
+      commands: {
+        summarize: {
+          data: { name: 'summarize', description: 'x' },
+          permissions: [],
+          execute: async () => count++,
+        },
+      },
+    });
+    client.createInteractionResponse = async () => {};
+    for (let i = 0; i < 4; i++) {
+      await handleInteraction(client, createMockInteraction({ data: { name: 'summarize', options: [] } }));
+    }
+    assert.strictEqual(count, 2); // HEAVY = 2/sec
+  });
+
+  it('resets the rate-limit window after one second', async () => {
+    const executed = [];
+    const store = new Map();
+    store.set(`request_limit:${USER_ID}`, { notified: true, time: Date.now() - 2000, count: 99 });
+    const client = createMockClient({
+      commands: {
+        ping: { data: { name: 'ping', description: 'x' }, permissions: [], execute: async () => executed.push(1) },
+      },
+      store,
+    });
+    client.createInteractionResponse = async () => {};
+    await handleInteraction(client, createMockInteraction({ data: { name: 'ping', options: [] } }));
+    assert.strictEqual(executed.length, 1);
+  });
+
+  it('parses an interaction with no options block', async () => {
+    let receivedArgs = null;
+    const client = createMockClient({
+      commands: {
+        ping: {
+          data: { name: 'ping', description: 'x' },
+          permissions: [],
+          execute: async (_c, _m, args) => {
+            receivedArgs = args;
+          },
+        },
+      },
+    });
+    client.createInteractionResponse = async () => {};
+    await handleInteraction(client, createMockInteraction({ data: { name: 'ping' } }));
+    assert.deepStrictEqual(receivedArgs, []);
+  });
+
+  it('reply shim accepts an object payload', async () => {
+    const responses = [];
+    const client = createMockClient({
+      commands: {
+        ping: {
+          data: { name: 'ping', description: 'x' },
+          permissions: [],
+          execute: async (_c, msg) => {
+            await msg.reply({ content: 'obj', embeds: [] });
+          },
+        },
+      },
+    });
+    client.createInteractionResponse = async (id, tok, body) => responses.push(body);
+    await handleInteraction(client, createMockInteraction({ data: { name: 'ping', options: [] } }));
+    assert.ok(responses.some((r) => r.data?.content === 'obj'));
+  });
+
+  it('defer(false) produces a non-ephemeral deferred response', async () => {
+    const responses = [];
+    const client = createMockClient({
+      commands: {
+        slow: {
+          data: { name: 'slow', description: 'x' },
+          permissions: [],
+          execute: async (_c, msg) => {
+            await msg.defer(false);
+          },
+        },
+      },
+    });
+    client.createInteractionResponse = async (id, tok, body) => responses.push(body);
+    await handleInteraction(client, createMockInteraction({ data: { name: 'slow', options: [] } }));
+    assert.ok(responses.some((r) => r.type === 5 && r.data === undefined));
+  });
+
+  it('command error swallows a failing editOriginalInteractionResponse', async () => {
+    const errors = [];
+    const client = createMockClient({
+      commands: {
+        boom: {
+          data: { name: 'boom', description: 'x' },
+          permissions: [],
+          execute: async (_c, msg) => {
+            await msg.defer();
+            throw new Error('cmd failed');
+          },
+        },
+      },
+    });
+    client.logger.error = (...a) => errors.push(a);
+    client.createInteractionResponse = async () => {};
+    client.editOriginalInteractionResponse = async () => {
+      throw new Error('expired');
+    };
+    await handleInteraction(client, createMockInteraction({ data: { name: 'boom', options: [] } }));
+    assert.ok(errors.length > 0);
+  });
+});

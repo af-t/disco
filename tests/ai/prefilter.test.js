@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { prefilter } from '../../src/ai/prefilter.js';
 
@@ -65,4 +65,11 @@ test('budget exhausted drops normal message', () => {
 
 test('default case is gate', () => {
   assert.equal(prefilter(mkMsg(), baseCtx), 'gate');
+});
+
+describe('prefilter channelState edge cases', () => {
+  it('treats a missing cooldownUntil as no cooldown', () => {
+    const ctx = { ...baseCtx, channelState: {} };
+    assert.strictEqual(prefilter(mkMsg(), ctx), 'gate');
+  });
 });

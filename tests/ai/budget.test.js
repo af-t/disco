@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { createBudget } from '../../src/ai/budget.js';
 
@@ -52,4 +52,23 @@ test('different guilds have isolated counters', async () => {
   await budget.increment('g2');
   assert.equal((await budget.current('g1')).count, 2);
   assert.equal((await budget.current('g2')).count, 1);
+});
+
+describe('createBudget guildId guards', () => {
+  it('current returns zero count and null key when guildId is missing', async () => {
+    const budget = createBudget({ store: makeStoreMock(), limit: 5 });
+    assert.deepStrictEqual(await budget.current(), { count: 0, key: null });
+  });
+
+  it('increment is a no-op when guildId is missing', async () => {
+    const store = makeStoreMock();
+    const budget = createBudget({ store, limit: 5 });
+    await budget.increment();
+    assert.strictEqual(store.data.size, 0);
+  });
+
+  it('exhausted returns false when guildId is missing', async () => {
+    const budget = createBudget({ store: makeStoreMock(), limit: 1 });
+    assert.strictEqual(await budget.exhausted(), false);
+  });
 });
