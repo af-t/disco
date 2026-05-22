@@ -213,7 +213,7 @@ class DiscordWebhookTools {
           const chunks = [];
           res.on('data', (chunk) => chunks.push(chunk));
           res.on('end', () => {
-            const data = Buffer.concat([chunks]);
+            const data = Buffer.concat(chunks);
             try {
               // Determine data type
               results.push(JSON.parse(data));

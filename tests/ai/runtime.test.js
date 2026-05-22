@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -522,4 +522,435 @@ test('invoke command mode persists and restores session via session:openrouter s
     after.some((m) => m.content === 'reply-1'),
     'agentMessages should rehydrate from store on second invoke',
   );
+});
+
+// ── onBotMessage ──────────────────────────────────────────────────────────────
+describe('ChannelAIRuntime onBotMessage', () => {
+  it('returns early when no channel_id', () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    rt.onBotMessage({}); // no channel_id — should not throw
+    assert.strictEqual(rt.channels.size, 0);
+  });
+
+  it('adds snap to rollingBuffer and sets cooldown', () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    rt.onBotMessage({ channel_id: 'c1', id: 'm1', content: 'hi', attachments: [] });
+    const s = rt.channels.get('c1');
+    assert.strictEqual(s.rollingBuffer.length, 1);
+    assert.ok(s.cooldownUntil > Date.now());
+    assert.ok(s.lastBotMsgAt > 0);
+  });
+
+  it('trims buffer when it exceeds bufferSize', () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent, config: { bufferSize: 2 } });
+    for (let i = 0; i < 3; i++) {
+      rt.onBotMessage({ channel_id: 'c1', id: `m${i}`, content: `msg${i}`, attachments: [] });
+    }
+    assert.strictEqual(rt.channels.get('c1').rollingBuffer.length, 2);
+  });
+});
+
+// ── onMessage ─────────────────────────────────────────────────────────────────
+describe('ChannelAIRuntime onMessage', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('skips bot messages', async () => {
+    const { stubClient, stubAgent, calls } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    await rt.onMessage({ author: { id: 'other', bot: true }, channel_id: 'c1', attachments: [] });
+    assert.strictEqual(calls.run, 0);
+  });
+
+  it('skips self messages', async () => {
+    const { stubClient, stubAgent, calls } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    await rt.onMessage({ author: { id: stubClient._session.user.id }, channel_id: 'c1', attachments: [] });
+    assert.strictEqual(calls.run, 0);
+  });
+
+  it('adds message to pendingMsgs and rollingBuffer', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_scheduleFlush', () => {}); // suppress actual flush
+    await rt.onMessage({
+      author: { id: 'u1', bot: false },
+      channel_id: 'c1',
+      content: 'x',
+      attachments: [],
+      guild_id: 'g1',
+    });
+    const s = rt.channels.get('c1');
+    assert.strictEqual(s.rollingBuffer.length, 1);
+    assert.strictEqual(s.pendingMsgs.length, 1);
+  });
+});
+
+// ── _flush ─────────────────────────────────────────────────────────────────────
+describe('ChannelAIRuntime _flush', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('sets rerunAfter when llmActive=true', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const s = rt._state('c1');
+    s.llmActive = true;
+    await rt._flush('c1');
+    assert.strictEqual(s.rerunAfter, true);
+  });
+
+  it('clears pendingMsgs when budget exhausted (non-force)', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt.budget, 'exhausted', async () => true);
+    const s = rt._state('c1');
+    s.pendingMsgs.push({ guild_id: 'g1', channel_id: 'c1', flag: 'new', content: 'x', attachments_meta: [] });
+    await rt._flush('c1');
+    assert.strictEqual(s.pendingMsgs.length, 0);
+    assert.strictEqual(s.llmActive, false);
+  });
+
+  it('runs agent and increments budget on success', async () => {
+    const { stubClient, stubAgent, calls } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt.budget, 'exhausted', async () => false);
+    const incrementSpy = mock.method(rt.budget, 'increment', async () => {});
+
+    const snap = {
+      guild_id: 'g1',
+      channel_id: 'c1',
+      flag: 'new',
+      content: 'hi',
+      attachments_meta: [],
+      id: 'm1',
+      author_id: 'u1',
+      author_name: 'user',
+      reply_to: null,
+      timestamp: Date.now(),
+    };
+    const s = rt._state('c1');
+    s.pendingMsgs.push(snap);
+    s.rollingBuffer.push(snap);
+
+    await rt._flush('c1');
+    assert.ok(calls.run >= 1);
+    assert.strictEqual(incrementSpy.mock.callCount(), 1);
+    assert.strictEqual(s.llmActive, false);
+  });
+
+  it('schedules rerun when rerunAfter is set in finally', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt.budget, 'exhausted', async () => false);
+    mock.method(rt, '_runAgent', async () => []);
+
+    const flushSpy = mock.method(rt, '_scheduleFlush', () => {});
+    const snap = {
+      flag: 'new',
+      content: 'x',
+      attachments_meta: [],
+      guild_id: 'g1',
+      channel_id: 'c1',
+      id: 'm2',
+      author_id: 'u1',
+      author_name: 'user',
+      reply_to: null,
+      timestamp: Date.now(),
+    };
+    const s = rt._state('c1');
+    s.rerunAfter = true;
+    s.pendingMsgs.push(snap);
+    s.rollingBuffer.push(snap);
+
+    await rt._flush('c1');
+    assert.strictEqual(flushSpy.mock.callCount(), 1);
+  });
+
+  it('logs error and resets llmActive when agent throws', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt.budget, 'exhausted', async () => false);
+    stubAgent.run = async () => {
+      throw new Error('agent failed');
+    };
+
+    const errors = [];
+    stubClient.logger.error = (...a) => {
+      errors.push(a);
+    };
+
+    const snap = {
+      flag: 'new',
+      content: 'x',
+      attachments_meta: [],
+      guild_id: 'g1',
+      channel_id: 'c1',
+      id: 'm3',
+      author_id: 'u1',
+      author_name: 'user',
+      reply_to: null,
+      timestamp: Date.now(),
+    };
+    const s = rt._state('c1');
+    s.pendingMsgs.push(snap);
+    s.rollingBuffer.push(snap);
+
+    await rt._flush('c1');
+    assert.ok(errors.length > 0);
+    assert.strictEqual(s.llmActive, false);
+  });
+});
+
+// ── invoke ─────────────────────────────────────────────────────────────────────
+describe('ChannelAIRuntime invoke', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('queues when llmActive=true', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const s = rt._state('c1');
+    s.llmActive = true;
+    await rt.invoke({
+      mode: 'command',
+      msg: { channel_id: 'c1', id: 'm1', author: { id: 'u1' }, content: 'hi', attachments: [] },
+    });
+    assert.strictEqual(s.rerunAfter, true);
+    assert.strictEqual(s.pendingForceRespond, true);
+  });
+
+  it('restores persisted session from store', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const persistedMessages = [{ role: 'user', content: 'from store' }];
+    await stubClient.store.set('session:openrouter:g1:u1', persistedMessages);
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_runAgent', async (msgs) => msgs);
+    mock.method(rt.budget, 'increment', async () => {});
+
+    await rt.invoke({
+      mode: 'command',
+      msg: { channel_id: 'c1', id: 'm1', guild_id: 'g1', author: { id: 'u1' }, content: 'hi', attachments: [] },
+    });
+    const s = rt._state('c1');
+    assert.deepStrictEqual(s.agentMessages, persistedMessages);
+  });
+
+  it('skips budget increment when no guild_id', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const incSpy = mock.method(rt.budget, 'increment', async () => {});
+    mock.method(rt, '_runAgent', async () => []);
+
+    await rt.invoke({
+      mode: 'command',
+      msg: { channel_id: 'c1', id: 'm1', guild_id: null, author: { id: 'u1' }, content: 'hi', attachments: [] },
+    });
+    assert.strictEqual(incSpy.mock.callCount(), 0);
+  });
+
+  it('resets llmActive on agent error', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubAgent.run = async () => {
+      throw new Error('boom');
+    };
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+
+    await rt.invoke({
+      mode: 'command',
+      msg: { channel_id: 'c1', id: 'm1', guild_id: 'g1', author: { id: 'u1' }, content: 'hi', attachments: [] },
+    });
+    assert.strictEqual(rt._state('c1').llmActive, false);
+  });
+
+  it('throws for unknown mode', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    await assert.rejects(
+      () =>
+        rt.invoke({ mode: 'unknown', msg: { channel_id: 'c1', id: 'm1', author: {}, content: '', attachments: [] } }),
+      /Unknown invoke mode/,
+    );
+  });
+});
+
+// ── _handleStoreDelete ─────────────────────────────────────────────────────────
+describe('ChannelAIRuntime _handleStoreDelete', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('returns early for non-string key', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    await rt._handleStoreDelete(42); // no throw
+  });
+
+  it('calls fs.rm for channel:buffer: key', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent, workspaceRoot: '/tmp/ws' });
+    const rmCalls = [];
+    mock.method(fs, 'rm', async (dir) => {
+      rmCalls.push(dir);
+    });
+    await rt._handleStoreDelete('channel:buffer:ch123');
+    assert.ok(rmCalls.some((d) => d.includes('channel-ch123')));
+  });
+
+  it('returns early for channel:buffer: with empty id', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    await rt._handleStoreDelete('channel:buffer:'); // empty channelId
+  });
+
+  it('calls fs.rm for session:openrouter: key', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent, workspaceRoot: '/tmp/ws' });
+    const rmCalls = [];
+    mock.method(fs, 'rm', async (dir) => {
+      rmCalls.push(dir);
+    });
+    await rt._handleStoreDelete('session:openrouter:g1:u1');
+    assert.ok(rmCalls.some((d) => d.includes('command-g1-u1')));
+  });
+
+  it('returns early for session:openrouter: with no guild/user separator', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    await rt._handleStoreDelete('session:openrouter:nocolon');
+  });
+});
+
+// ── _installCleanupHook ────────────────────────────────────────────────────────
+describe('ChannelAIRuntime _installCleanupHook', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('no-op when client has no store', () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubClient.store = null;
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    // re-invoking the hook with no store must early-return without throwing
+    assert.strictEqual(rt._installCleanupHook(), undefined);
+  });
+
+  it('calls prior onDelete hook before workspace cleanup', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const priorCalls = [];
+    stubClient.store.onDelete = async (k) => {
+      priorCalls.push(k);
+    };
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(rt, '_handleStoreDelete', async () => {});
+
+    await stubClient.store.onDelete('channel:buffer:c1', {});
+    assert.ok(priorCalls.includes('channel:buffer:c1'));
+  });
+
+  it('still runs workspace cleanup when prior hook throws', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubClient.store.onDelete = async () => {
+      throw new Error('prior failed');
+    };
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const cleanupCalls = [];
+    mock.method(rt, '_handleStoreDelete', async (k) => {
+      cleanupCalls.push(k);
+    });
+
+    await stubClient.store.onDelete('channel:buffer:c1', {});
+    assert.ok(cleanupCalls.includes('channel:buffer:c1'));
+  });
+});
+
+// ── _saveNonImageAttachments ───────────────────────────────────────────────────
+describe('ChannelAIRuntime _saveNonImageAttachments', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('returns [] for null/empty attachments', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    assert.deepStrictEqual(await rt._saveNonImageAttachments(null, 'm1', '/tmp'), []);
+    assert.deepStrictEqual(await rt._saveNonImageAttachments([], 'm1', '/tmp'), []);
+  });
+
+  it('returns [] for image-only attachments', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const atts = [{ url: 'http://x/img.png', content_type: 'image/png', filename: 'img.png' }];
+    assert.deepStrictEqual(await rt._saveNonImageAttachments(atts, 'm1', '/tmp'), []);
+  });
+
+  it('returns [] and logs warn when mkdir fails', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    mock.method(fs, 'mkdir', async () => {
+      throw new Error('permission denied');
+    });
+    const warns = [];
+    stubClient.logger.warn = (...a) => {
+      warns.push(a);
+    };
+
+    const atts = [{ url: 'http://x/doc.pdf', content_type: 'application/pdf', filename: 'doc.pdf' }];
+    const result = await rt._saveNonImageAttachments(atts, 'm1', '/tmp/ws');
+    assert.deepStrictEqual(result, []);
+    assert.ok(warns.length > 0, 'mkdir failure should be logged');
+  });
+
+  it('skips attachment when fetch fails', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({
+      client: stubClient,
+      agent: stubAgent,
+      fetcher: async () => {
+        throw new Error('network error');
+      },
+    });
+
+    const workspaceDir = os.tmpdir() + '/ws-fetch-fail-' + Date.now();
+    const atts = [{ url: 'http://x/doc.pdf', content_type: 'application/pdf', filename: 'doc.pdf' }];
+    const result = await rt._saveNonImageAttachments(atts, 'm1', workspaceDir);
+    assert.deepStrictEqual(result, []);
+    // cleanup dir if created
+    await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('saves attachment and returns entry on success', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({
+      client: stubClient,
+      agent: stubAgent,
+      fetcher: fakeFetcherWith('PDF CONTENT'),
+      workspaceRoot: os.tmpdir(),
+    });
+
+    const workspaceDir = os.tmpdir() + '/rt-test-' + Date.now();
+    const atts = [{ url: 'http://x/doc.pdf', content_type: 'application/pdf', filename: 'doc.pdf' }];
+    const result = await rt._saveNonImageAttachments(atts, 'm1', workspaceDir);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].original, 'doc.pdf');
+    assert.ok(result[0].saved_path.endsWith('doc.pdf'));
+    // cleanup
+    await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+});
+
+// ── _guildOf ──────────────────────────────────────────────────────────────────
+describe('ChannelAIRuntime _guildOf', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('returns guild_id from channel', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const result = await rt._guildOf('c1');
+    assert.strictEqual(result, 'g1');
+  });
+
+  it('returns null when getChannel throws', async () => {
+    const { stubClient, stubAgent } = makeStubs();
+    stubClient.getChannel = async () => {
+      throw new Error('not found');
+    };
+    const rt = new ChannelAIRuntime({ client: stubClient, agent: stubAgent });
+    const result = await rt._guildOf('c1');
+    assert.strictEqual(result, null);
+  });
 });

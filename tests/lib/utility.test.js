@@ -1,7 +1,9 @@
-import test from 'node:test';
+import test, { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
+import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import utility from '../../src/lib/utility.js';
 
 const { Logger, importCommands, importEvents, deploySlashCommands, formatAgo, getPermissions } = utility;
@@ -249,4 +251,249 @@ test('getPermissions: admin permission flag (8 = 1<<3)', async () => {
   const perms = await getPermissions(mockClient, 'guild_1', member);
   assert.strictEqual(perms, 8n);
   assert.strictEqual(typeof perms, 'bigint');
+});
+
+// ── Logger ────────────────────────────────────────────────────────────────────
+describe('Logger methods', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('warn writes to stderr', () => {
+    const writes = [];
+    mock.method(process.stderr, 'write', (s) => {
+      writes.push(s);
+    });
+    const logger = new Logger('TEST');
+    logger.warn('oops');
+    assert.ok(writes.some((w) => w.includes('oops')));
+  });
+
+  it('info writes to stdout', () => {
+    const writes = [];
+    mock.method(process.stdout, 'write', (s) => {
+      writes.push(s);
+    });
+    const logger = new Logger('TEST');
+    logger.info('info-msg');
+    assert.ok(writes.some((w) => w.includes('info-msg')));
+  });
+
+  it('error writes to stderr', () => {
+    const writes = [];
+    mock.method(process.stderr, 'write', (s) => {
+      writes.push(s);
+    });
+    const logger = new Logger('TEST');
+    logger.error('err-msg');
+    assert.ok(writes.some((w) => w.includes('err-msg')));
+  });
+
+  it('debug writes to stdout', () => {
+    const writes = [];
+    mock.method(process.stdout, 'write', (s) => {
+      writes.push(s);
+    });
+    const logger = new Logger('TEST');
+    logger.debug('dbg');
+    assert.ok(writes.some((w) => w.includes('dbg')));
+  });
+
+  it('non-string arg uses util.inspect format', () => {
+    const writes = [];
+    mock.method(process.stdout, 'write', (s) => {
+      writes.push(s);
+    });
+    const logger = new Logger('TEST');
+    logger.log({ nested: true });
+    assert.ok(writes.some((w) => w.includes('nested')));
+  });
+
+  it('createLogger instance method returns Logger with correct name', () => {
+    const logger = new Logger('A');
+    const child = logger.createLogger('B');
+    assert.strictEqual(child.name, 'B');
+  });
+
+  it('Logger.createLogger static returns Logger with correct name', () => {
+    const logger = Logger.createLogger('FOO');
+    assert.strictEqual(logger.name, 'FOO');
+  });
+});
+
+// ── formatAgo ─────────────────────────────────────────────────────────────────
+describe('formatAgo', () => {
+  it('future timestamp returns just now', () => {
+    assert.strictEqual(formatAgo(Date.now() + 5000), 'just now');
+  });
+  it('30s ago', () => {
+    assert.strictEqual(formatAgo(Date.now() - 30_000), '30s ago');
+  });
+  it('90s ago returns 1m 30s ago', () => {
+    assert.strictEqual(formatAgo(Date.now() - 90_000), '1m 30s ago');
+  });
+  it('1h1m ago', () => {
+    assert.ok(formatAgo(Date.now() - 3_661_000).startsWith('1h'));
+  });
+});
+
+// ── deploySlashCommands error path ────────────────────────────────────────────
+describe('deploySlashCommands makeRequest error', () => {
+  it('logs error when makeRequest throws', async () => {
+    const errors = [];
+    const client = {
+      _session: { application: { id: 'app1' } },
+      logger: { warn: () => {}, info: () => {}, error: (...args) => errors.push(args) },
+      store: { get: async () => 'different-hash', set: async () => {} },
+      makeRequest: async () => {
+        throw new Error('network error');
+      },
+    };
+    await deploySlashCommands(client, {
+      ping: Object.assign(() => {}, {
+        data: { name: 'ping', description: 'Ping', slash: true },
+      }),
+    });
+    assert.ok(errors.some((e) => e.some((a) => typeof a === 'string' && a.includes('Failed'))));
+  });
+});
+
+// ── importCommands subdirectory recursion ─────────────────────────────────────
+describe('importCommands subdirectory recursion', () => {
+  it('loads commands from nested subdirectories', async () => {
+    const base = join(tmpdir(), 'util_sub_' + Date.now());
+    const sub = join(base, 'subcmds');
+    await mkdir(sub, { recursive: true });
+    await writeFile(
+      join(sub, 'ping.js'),
+      `export default { data: { name: 'ping', description: 'Ping' }, execute: async () => {} };`,
+    );
+    try {
+      const commands = await importCommands(base);
+      assert.ok('ping' in commands);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── importCommands duplicate alias warning ────────────────────────────────────
+describe('importCommands duplicate alias warning', () => {
+  it('warns and skips when alias already registered', async () => {
+    const base = join(tmpdir(), 'util_dup_' + Date.now());
+    await mkdir(base, { recursive: true });
+    await writeFile(
+      join(base, 'ping.js'),
+      `export default { data: { name: 'ping', description: 'Ping', aliases: ['p'] }, execute: async () => {} };`,
+    );
+    await writeFile(
+      join(base, 'pong.js'),
+      `export default { data: { name: 'pong', description: 'Pong', aliases: ['p'] }, execute: async () => {} };`,
+    );
+    try {
+      const commands = await importCommands(base);
+      // At least one of ping/pong loaded, duplicate alias skipped without throw
+      assert.ok('ping' in commands || 'pong' in commands);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── importCommands bad module structure ───────────────────────────────────────
+describe('importCommands warns on bad module structure', () => {
+  it('warns when module lacks data.name or execute', async () => {
+    const base = join(tmpdir(), 'util_bad_' + Date.now());
+    await mkdir(base, { recursive: true });
+    await writeFile(join(base, 'notacmd.js'), `export default {};`);
+    try {
+      const commands = await importCommands(base);
+      assert.deepStrictEqual(Object.keys(commands), []);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── importCommands import throws ──────────────────────────────────────────────
+describe('importCommands handles import error gracefully', () => {
+  it('warns and continues when a file throws during import', async () => {
+    const base = join(tmpdir(), 'util_err_' + Date.now());
+    await mkdir(base, { recursive: true });
+    // File that throws at module evaluation time — unique name avoids ESM cache
+    await writeFile(join(base, 'broken.js'), `throw new Error('module init error');`);
+    try {
+      const commands = await importCommands(base);
+      assert.deepStrictEqual(Object.keys(commands), []);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── importEvents catch block ──────────────────────────────────────────────────
+describe('importEvents handles import error gracefully', () => {
+  it('warns and continues when event file throws during import', async () => {
+    const base = join(tmpdir(), 'util_evt_' + Date.now());
+    await mkdir(base, { recursive: true });
+    await writeFile(join(base, 'bad_event.js'), `throw new Error('event load error');`);
+    const client = { on: () => {} };
+    try {
+      await importEvents(client, base);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── deploySlashCommands options map ──────────────────────────────────────────
+describe('deploySlashCommands with options', () => {
+  it('maps options including autocomplete=false default', async () => {
+    let putPayload;
+    const client = {
+      _session: { application: { id: 'app1' } },
+      logger: { warn: () => {}, info: () => {}, error: () => {} },
+      store: { get: async () => 'different-hash', set: async () => {} },
+      makeRequest: async (_method, _path, body) => {
+        putPayload = body;
+      },
+    };
+    await deploySlashCommands(client, {
+      search: Object.assign(() => {}, {
+        data: {
+          name: 'search',
+          description: 'Search',
+          slash: true,
+          options: [{ name: 'query', description: 'Query', type: 3, required: true }],
+        },
+      }),
+    });
+    assert.ok(Array.isArray(putPayload));
+    assert.strictEqual(putPayload[0].options[0].autocomplete, false);
+  });
+});
+
+// ── deploySlashCommands hash-unchanged skip ───────────────────────────────────
+describe('deploySlashCommands hash-unchanged skip', () => {
+  it('skips PUT when hash is unchanged', async () => {
+    let putCalled = false;
+    const { createHash } = await import('node:crypto');
+    const cmd = { name: 'ping', description: 'Ping', options: [] };
+    const hash = createHash('sha256')
+      .update(JSON.stringify([cmd]))
+      .digest('hex');
+
+    const client = {
+      _session: { application: { id: 'app1' } },
+      logger: { warn: () => {}, info: () => {}, error: () => {} },
+      store: { get: async () => hash, set: async () => {} },
+      makeRequest: async () => {
+        putCalled = true;
+      },
+    };
+    await deploySlashCommands(client, {
+      ping: Object.assign(() => {}, {
+        data: { name: 'ping', description: 'Ping', slash: true },
+      }),
+    });
+    assert.strictEqual(putCalled, false);
+  });
 });

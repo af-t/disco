@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert';
 import handleMessage from '../../src/events/message_create.js';
 
@@ -415,4 +415,516 @@ test('should call AI command when bot is mentioned', async () => {
   });
   await handleMessage(client, msg);
   assert.strictEqual(aiCalled, true, 'AI command should be called on mention');
+});
+
+// ── Anti-link moderation (additional coverage) ────────────────────────────────
+describe('message_create anti-link', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('deletes message with disallowed link (non-mod user)', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = createMockClient();
+    const deleted = [];
+    client.deleteMessage = async (cid, mid) => {
+      deleted.push(mid);
+    };
+    client.sendMessage = async () => ({ id: 'warn-msg' });
+
+    const m = createMockMessage({ content: 'check this http://evil.example.com' });
+    await handleMessage(client, m);
+    assert.ok(deleted.includes(m.id));
+  });
+
+  it('allows disallowed link for user with MANAGE_MESSAGES', async () => {
+    // MANAGE_MESSAGES = 1 << 13 = 8192
+    const client = createMockClient();
+    client.getRoles = async () => [{ id: 'r1', permissions: String(8192) }];
+    client.getGuildMember = async () => ({ roles: ['r1'] });
+    const deleted = [];
+    client.deleteMessage = async (cid, mid) => {
+      deleted.push(mid);
+    };
+
+    const m = createMockMessage({ content: 'http://evil.example.com' });
+    await handleMessage(client, m);
+    assert.strictEqual(deleted.length, 0);
+  });
+
+  it('allows message with only allowlisted domains', async () => {
+    const client = createMockClient();
+    const deleted = [];
+    client.deleteMessage = async (cid, mid) => {
+      deleted.push(mid);
+    };
+
+    const m = createMockMessage({ content: 'https://github.com/foo' });
+    await handleMessage(client, m);
+    assert.strictEqual(deleted.length, 0);
+  });
+});
+
+// ── Anti-spam (additional coverage) ──────────────────────────────────────────
+describe('message_create anti-spam', () => {
+  it('deletes repeated message (length > 5)', async () => {
+    const client = createMockClient();
+    const deleted = [];
+    client.deleteMessage = async (cid, mid) => {
+      deleted.push(mid);
+    };
+
+    const content = 'repeated spam message';
+    const m1 = createMockMessage({ content });
+    const m2 = createMockMessage({ id: 'msg-002', content });
+
+    await handleMessage(client, m1);
+    await handleMessage(client, m2);
+    assert.ok(deleted.includes('msg-002'));
+  });
+
+  it('does not delete when content length <= 5', async () => {
+    const client = createMockClient();
+    const deleted = [];
+    client.deleteMessage = async (cid, mid) => {
+      deleted.push(mid);
+    };
+
+    const m1 = createMockMessage({ content: 'hi' });
+    const m2 = createMockMessage({ id: 'msg-002', content: 'hi' });
+
+    await handleMessage(client, m1);
+    await handleMessage(client, m2);
+    assert.strictEqual(deleted.length, 0);
+  });
+});
+
+// ── AFK hooks (additional coverage) ──────────────────────────────────────────
+describe('message_create AFK hooks', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('clears own AFK and sends welcome back message', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = createMockClient();
+    const since = Date.now() - 60_000;
+    await client.store.set(`afk:${GUILD_ID}:${USER_001}`, { since, message: 'sleeping' });
+
+    const sent = [];
+    client.sendMessage = async (cid, content) => {
+      sent.push(typeof content === 'string' ? content : JSON.stringify(content));
+      return { id: 'w' };
+    };
+    client.deleteMessage = async () => {};
+
+    const m = createMockMessage({ content: 'im back' });
+    await handleMessage(client, m);
+
+    assert.ok(sent.some((s) => s.includes('Welcome back')));
+    assert.strictEqual(await client.store.get(`afk:${GUILD_ID}:${USER_001}`), undefined);
+  });
+
+  it('notifies about AFK-mentioned user', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    // Use a different user id than USER_001 to avoid self-AFK clear
+    const OTHER_USER = '999999999999999999';
+    const client = createMockClient();
+    const since = Date.now() - 30_000;
+    await client.store.set(`afk:${GUILD_ID}:${OTHER_USER}`, { since, message: 'brb' });
+
+    const sent = [];
+    client.sendMessage = async (cid, content) => {
+      sent.push(typeof content === 'string' ? content : JSON.stringify(content));
+      return { id: 'w' };
+    };
+    client.deleteMessage = async () => {};
+
+    const m = createMockMessage({ content: `hey <@${OTHER_USER}>` });
+    await handleMessage(client, m);
+
+    // Should send the AFK notification line with "is AFK"
+    assert.ok(sent.some((s) => s.includes('is AFK')));
+  });
+
+  it('skips self-mention in AFK notify', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = createMockClient();
+    // user is AFK but mentions themselves; notify should not fire for self
+    await client.store.set(`afk:${GUILD_ID}:${USER_001}`, { since: Date.now(), message: 'away' });
+    const sent = [];
+    client.sendMessage = async (cid, content) => {
+      sent.push(typeof content === 'string' ? content : JSON.stringify(content));
+      return { id: 'w' };
+    };
+    client.deleteMessage = async () => {};
+
+    // message mentions self (USER_001) while USER_001 is AFK
+    const m = createMockMessage({ content: `hey <@${USER_001}>` });
+    await handleMessage(client, m);
+
+    // AFK notify skipped for self-mention; only welcome-back may fire
+    const afkNotifications = sent.filter((s) => s.includes('is AFK'));
+    assert.strictEqual(afkNotifications.length, 0);
+  });
+});
+
+// ── Rate limiting (additional coverage) ───────────────────────────────────────
+describe('message_create rate limiting', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('sends rate limit reply after DEFAULT threshold', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = createMockClient({
+      hasCommands: {
+        // unknowncmd has no permissions so DEFAULT rate applies
+        unknowncmd: async () => {},
+      },
+    });
+    const replies = [];
+    client.sendMessage = async (cid, content) => {
+      replies.push(typeof content === 'string' ? content : '');
+      return { id: 'r' };
+    };
+    client.deleteMessage = async () => {};
+
+    // fire 6 messages rapidly (DEFAULT = 5/s); 6th triggers rate limit
+    for (let i = 0; i < 6; i++) {
+      await handleMessage(client, createMockMessage({ content: `.unknowncmd arg${i}` }));
+    }
+    // Should have sent a rate-limit notice
+    assert.ok(replies.some((r) => r.includes('slow down')));
+  });
+});
+
+// ── parseMessage formats (additional coverage) ────────────────────────────────
+describe('message_create parseMessage formats', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('bot mention triggers AI command', async () => {
+    const aiCalls = [];
+    const client = createMockClient({
+      hasCommands: {
+        ai: async () => {
+          aiCalls.push(1);
+        },
+      },
+    });
+    const botId = client._session.user.id;
+    const m = createMockMessage({ content: `<@${botId}> hello there` });
+    await handleMessage(client, m);
+    assert.strictEqual(aiCalls.length, 1);
+  });
+
+  it('prefix with space (". cmd") parses correctly', async () => {
+    const executed = [];
+    const client = createMockClient({
+      hasCommands: {
+        help: async () => {
+          executed.push(1);
+        },
+      },
+    });
+    // ". help" format (prefix as standalone token)
+    const m = createMockMessage({ content: '. help' });
+    await handleMessage(client, m);
+    assert.strictEqual(executed.length, 1);
+  });
+});
+
+// ── Permission check (additional coverage) ────────────────────────────────────
+describe('message_create permission check', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('denies permissioned command when user lacks role', async () => {
+    const replies = [];
+    const client = createMockClient();
+    // command with permissions declared
+    client.commands.ban = Object.assign(async () => {}, {
+      permissions: ['BAN_MEMBERS'],
+    });
+    client.reply = async (m, content) => {
+      replies.push(typeof content === 'string' ? content : JSON.stringify(content));
+    };
+    client.getRoles = async () => [{ id: 'r1', permissions: '0' }];
+    client.getGuildMember = async () => ({ roles: ['r1'] });
+
+    await handleMessage(client, createMockMessage({ content: '.ban someone' }));
+    assert.ok(replies.some((r) => r.includes('permission')));
+  });
+
+  it('ADMINISTRATOR bypasses specific permission', async () => {
+    const executed = [];
+    const client = createMockClient();
+    client.commands.ban = Object.assign(
+      async () => {
+        executed.push(1);
+      },
+      {
+        permissions: ['BAN_MEMBERS'],
+      },
+    );
+    // ADMINISTRATOR = 1 << 3 = 8
+    client.getRoles = async () => [{ id: 'r1', permissions: '8' }];
+    client.getGuildMember = async () => ({ roles: ['r1'] });
+
+    await handleMessage(client, createMockMessage({ content: '.ban someone' }));
+    assert.strictEqual(executed.length, 1);
+  });
+
+  it('denies permissioned command in DMs (non-guild, naturalMode)', async () => {
+    const replies = [];
+    const client = createMockClient();
+    // naturalMode active so parseDMCommand runs and returns a cmd
+    client.aiRuntime = { onMessage: async () => {} };
+    client.commands.ban = Object.assign(async () => {}, {
+      permissions: ['BAN_MEMBERS'],
+    });
+    client.reply = async (m, content) => {
+      replies.push(typeof content === 'string' ? content : JSON.stringify(content));
+    };
+    // DM: no guild_id — permissions block should deny since !isGuildMessage
+    await handleMessage(client, createMockMessage({ content: '.ban someone', guild_id: undefined }));
+    assert.ok(replies.some((r) => r.includes('permission')));
+  });
+});
+
+// ── naturalMode DM ─────────────────────────────────────────────────────────────
+describe('message_create naturalMode DM', () => {
+  it('dispatches DM to aiRuntime.onMessage when naturalMode active', async () => {
+    const onMessageCalls = [];
+    const client = createMockClient();
+    client.aiRuntime = {
+      onMessage: async (m) => {
+        onMessageCalls.push(m);
+      },
+    };
+
+    // guild_id undefined = DM; with aiRuntime set, parseDMCommand runs then naturalMode path fires
+    const m = createMockMessage({ content: 'hello', guild_id: undefined });
+    await handleMessage(client, m);
+    assert.strictEqual(onMessageCalls.length, 1);
+  });
+
+  it('executes DM prefix command when naturalMode active', async () => {
+    const executed = [];
+    const client = createMockClient();
+    client.aiRuntime = { onMessage: async () => {} };
+    client.commands.ping = async () => {
+      executed.push(1);
+    };
+
+    // .ping in DM with aiRuntime — parseDMCommand finds cmd, executes it
+    const m = createMockMessage({ content: '.ping', guild_id: undefined });
+    await handleMessage(client, m);
+    assert.strictEqual(executed.length, 1);
+  });
+});
+
+// ── parseDM timer (lines 18-36, 222-223) ──────────────────────────────────────
+describe('message_create parseDM timer', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('batches DM content and resolves after 7s timer', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const aiCalls = [];
+    const client = createMockClient({
+      hasCommands: {
+        ai: async (c, m, a, raw) => {
+          aiCalls.push(raw);
+        },
+      },
+    });
+    // no aiRuntime → parseDM path (!isGuildMessage && !naturalMode)
+
+    const m = createMockMessage({ content: 'hello world', guild_id: undefined });
+    // handleMessage awaits parseDM which awaits the 7s setTimeout
+    const handlePromise = handleMessage(client, m);
+
+    // Tick the mocked timer to fire the 7000ms callback
+    mock.timers.tick(7000);
+    // Drain the microtask/macrotask queue so the promise resolves
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    await handlePromise;
+    assert.strictEqual(aiCalls.length, 1);
+    assert.ok(aiCalls[0].includes('hello world'));
+  });
+
+  it('returns {} immediately for second DM while reading=true', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = createMockClient({
+      hasCommands: { ai: async () => {} },
+    });
+
+    const m1 = createMockMessage({ content: 'first message', guild_id: undefined });
+    const m2 = createMockMessage({ content: 'second message', guild_id: undefined });
+
+    // Start first DM — sets reading=true then waits for the 7s timer
+    const p1 = handleMessage(client, m1);
+
+    // Second DM while reading=true → parseDM returns {} immediately, handler returns
+    const p2 = handleMessage(client, m2);
+    await p2; // resolves immediately because parsed = {} → no cmd, no useAI
+
+    // Tick timer to let first promise resolve too
+    mock.timers.tick(7000);
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    await p1;
+  });
+});
+
+// ── parseMessage standalone ". " prefix (lines 51-52) ─────────────────────────
+describe('message_create parseMessage dot-space no command', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('returns early when message is just a standalone period with no command', async () => {
+    const client = createMockClient();
+    // ". " — prefix is a standalone token but nothing follows it
+    const m = createMockMessage({ content: '. ' });
+    const result = await handleMessage(client, m);
+    // no cmd, no useAI → handler falls through silently
+    assert.strictEqual(result, undefined);
+  });
+});
+
+// ── anti-link invalid URL catch block (lines 130-131) ─────────────────────────
+describe('message_create anti-link invalid URL catch', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('treats malformed URL where new URL() throws as disallowed', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const deleted = [];
+    const client = createMockClient();
+    client.deleteMessage = async (cid, mid) => {
+      deleted.push(mid);
+    };
+    client.sendMessage = async () => ({ id: 'warn1' });
+    client.getGuildMember = async () => ({ roles: [] });
+    client.getRoles = async () => [];
+
+    // https://bad[bracket matches the URL regex but new URL() throws a TypeError
+    const m = createMockMessage({ content: 'check this: https://bad[bracket' });
+    await handleMessage(client, m);
+    // invalid URL treated as disallowed → message deleted
+    assert.ok(deleted.includes(m.id));
+  });
+});
+
+// ── rate limit counter reset (lines 242-245) ──────────────────────────────────
+describe('message_create rate limit counter reset', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('resets rate limit counter when last command was > 1 second ago', async () => {
+    const executed = [];
+    const client = createMockClient({
+      hasCommands: {
+        ping: async () => {
+          executed.push(1);
+        },
+      },
+    });
+
+    // Pre-populate the store with an old timestamp (2s ago) and saturated count
+    const oldCached = {
+      notified: false,
+      time: Date.now() - 2000, // 2 seconds ago → window expired
+      count: 10, // artificially high — would normally block
+    };
+    await client.store.set(`request_limit:${USER_001}`, oldCached, true);
+
+    const m = createMockMessage({ content: '.ping' });
+    await handleMessage(client, m);
+
+    // Counter was reset (count went from 10 → 1 after reset), so command executes
+    assert.strictEqual(executed.length, 1);
+  });
+});
+
+// ── member with no roles denies permissioned command (line 265) ───────────────
+describe('message_create member with no roles', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('denies permissioned command when getGuildMember returns member without roles', async () => {
+    const replies = [];
+    const client = createMockClient();
+    client.commands.ban = Object.assign(async () => {}, {
+      permissions: ['BAN_MEMBERS'],
+    });
+    client.reply = async (m, content) => {
+      replies.push(content);
+    };
+    // member object exists but has no .roles property → !member?.roles is true
+    client.getGuildMember = async () => ({ id: 'u1' });
+
+    const m = createMockMessage({ content: '.ban target' });
+    await handleMessage(client, m);
+
+    assert.ok(replies.some((r) => typeof r === 'string' && r.includes('permission')));
+  });
+});
+
+// ── unknown permission flag warning (lines 278-280) ───────────────────────────
+describe('message_create unknown permission flag', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('warns and denies command when permission name is not in permissionFlags', async () => {
+    const warnings = [];
+    const replies = [];
+    const client = createMockClient();
+    client.commands.special = Object.assign(async () => {}, {
+      permissions: ['TOTALLY_FAKE_PERM'],
+    });
+    client.logger.warn = (...args) => {
+      warnings.push(args.join(' '));
+    };
+    client.reply = async (m, content) => {
+      replies.push(content);
+    };
+    client.getGuildMember = async () => ({ roles: ['r1'] });
+    client.getRoles = async () => [{ id: 'r1', permissions: '0' }];
+
+    const m = createMockMessage({ content: '.special arg' });
+    await handleMessage(client, m);
+
+    assert.ok(warnings.some((w) => w.includes('Unknown permission')));
+    assert.ok(replies.some((r) => typeof r === 'string' && r.includes('permission')));
+  });
+});
+
+// ── commands.ai fallback for unknown command (lines 296-298) ──────────────────
+describe('message_create commands.ai fallback', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('calls commands.ai when the command is not in client.commands', async () => {
+    const aiCalls = [];
+    const client = createMockClient({
+      hasCommands: {
+        ai: async (c, m, a, raw) => {
+          aiCalls.push(raw);
+        },
+      },
+    });
+    // 'nonexistent' is not in client.commands, but commands.ai exists
+
+    const m = createMockMessage({ content: '.nonexistent some args' });
+    await handleMessage(client, m);
+
+    assert.strictEqual(aiCalls.length, 1);
+  });
 });

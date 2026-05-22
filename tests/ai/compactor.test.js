@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { shouldCompact, compact } from '../../src/ai/compactor.js';
 
@@ -31,4 +31,18 @@ test('compact returns input untouched if length <= keepTail', async () => {
   const msgs = Array.from({ length: 5 }, (_, i) => ({ role: 'user', content: `m${i}` }));
   const out = await compact(msgs, { keepTail: 10, summarizer: async () => 'x' });
   assert.deepEqual(out, msgs);
+});
+
+describe('compact summarizer error', () => {
+  it('falls back to error message when summarizer throws', async () => {
+    const msgs = Array.from({ length: 20 }, (_, i) => ({ role: 'user', content: `m${i}` }));
+    const out = await compact(msgs, {
+      keepTail: 5,
+      summarizer: async () => {
+        throw new Error('LLM down');
+      },
+    });
+    assert.strictEqual(out.length, 6); // 1 system + 5 tail
+    assert.match(out[0].content, /failed to summarize/);
+  });
 });

@@ -305,10 +305,10 @@ class StoreClient extends StoreBase {
 
           // fall back to server when memory missed
           if (!meta || meta.location === LOCATION.SERVER) {
-            this._stats.cache.promotions++;
             try {
               const value = await this._send('get', [key]);
               if (value !== undefined && value !== null) {
+                this._stats.cache.promotions++;
                 const newMeta = meta ?? {
                   created: Date.now(),
                   isCache: true,
@@ -552,20 +552,19 @@ class StoreClient extends StoreBase {
         reject: (e) => settle(reject, e),
       });
 
+      // Arm the timeout before send so a synchronous send error still clears it
+      timeout = setTimeout(() => {
+        if (this._pendingRequests.has(id)) {
+          settle(reject, new Error('Request timed out'));
+        }
+      }, 30000);
+
       const payload = JSON.stringify({ op, id, args });
       this._ws.send(payload, (err) => {
         if (err) {
           settle(reject, err);
         }
       });
-
-      // Safety timeout (cleared automatically on settle)
-      timeout = setTimeout(() => {
-        if (this._pendingRequests.has(id)) {
-          const { reject: timeoutReject } = this._pendingRequests.get(id);
-          settle(timeoutReject, new Error('Request timed out'));
-        }
-      }, 30000);
     });
   }
 }

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert';
 import handleInteraction from '../../src/events/interaction_create.js';
 
@@ -321,4 +322,337 @@ test('should ignore unknown command', async () => {
   // Should not throw
   await handleInteraction(client, interaction);
   assert.ok(true, 'Should handle unknown command gracefully');
+});
+
+// ── Type filtering ─────────────────────────────────────────────────────────────
+describe('interaction_create type filtering', () => {
+  it('ignores interaction type 3 (MESSAGE_COMPONENT)', async () => {
+    const client = createMockClient();
+    const responses = [];
+    client.createInteractionResponse = async (...a) => {
+      responses.push(a);
+    };
+    await handleInteraction(client, createMockInteraction({ type: 3 }));
+    assert.strictEqual(responses.length, 0);
+  });
+
+  it('returns early when client.commands is null', async () => {
+    const client = createMockClient();
+    client.commands = null;
+    const responses = [];
+    client.createInteractionResponse = async (...a) => {
+      responses.push(a);
+    };
+    await handleInteraction(client, createMockInteraction({ type: 2 }));
+    assert.strictEqual(responses.length, 0);
+  });
+});
+
+// ── Autocomplete (type 4) ─────────────────────────────────────────────────────
+describe('interaction_create autocomplete', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('returns help command choices filtered by query', async () => {
+    const client = createMockClient({
+      commands: {
+        ping: { data: { name: 'ping', description: 'Pong' }, execute: async () => {} },
+        ban: { data: { name: 'ban', description: 'Ban user' }, execute: async () => {} },
+      },
+    });
+    const responses = [];
+    client.createInteractionResponse = async (id, token, body) => {
+      responses.push(body);
+    };
+
+    await handleInteraction(client, {
+      id: 'i1',
+      token: 'tok',
+      type: 4,
+      data: {
+        name: 'help',
+        options: [{ name: 'command', focused: true, value: 'pi' }],
+      },
+    });
+
+    assert.strictEqual(responses.length, 1);
+    assert.strictEqual(responses[0].type, 8);
+    assert.ok(responses[0].data.choices.every((c) => c.name.includes('pi')));
+  });
+
+  it('non-help autocomplete returns without response', async () => {
+    const client = createMockClient({
+      commands: { ping: { data: { name: 'ping', description: 'x' }, execute: async () => {} } },
+    });
+    const responses = [];
+    client.createInteractionResponse = async (...a) => {
+      responses.push(a);
+    };
+
+    await handleInteraction(client, {
+      id: 'i1',
+      token: 'tok',
+      type: 4,
+      data: { name: 'other', options: [{ name: 'x', focused: true, value: '' }] },
+    });
+    assert.strictEqual(responses.length, 0);
+  });
+});
+
+// ── Unknown command ───────────────────────────────────────────────────────────
+describe('interaction_create unknown command', () => {
+  it('returns without error for unknown command name', async () => {
+    const client = createMockClient({ commands: {} });
+    const responses = [];
+    client.createInteractionResponse = async (...a) => {
+      responses.push(a);
+    };
+    await handleInteraction(client, createMockInteraction({ data: { name: 'unknown', options: [] } }));
+    assert.strictEqual(responses.length, 0);
+  });
+});
+
+// ── Permission check ──────────────────────────────────────────────────────────
+describe('interaction_create permission check', () => {
+  it('responds with Unable to verify when member is null', async () => {
+    const client = createMockClient({
+      commands: {
+        ban: {
+          data: { name: 'ban', description: 'Ban', permissions: ['BAN_MEMBERS'] },
+          permissions: ['BAN_MEMBERS'],
+          execute: async () => {},
+        },
+      },
+      guildMember: null,
+    });
+    const responses = [];
+    client.createInteractionResponse = async (id, tok, body) => {
+      responses.push(body);
+    };
+
+    await handleInteraction(
+      client,
+      createMockInteraction({
+        data: { name: 'ban', options: [] },
+        member: null,
+      }),
+    );
+    assert.ok(responses.some((r) => r.data?.content?.includes('Unable to verify')));
+  });
+
+  it('denies when user lacks permission', async () => {
+    const client = createMockClient({
+      commands: {
+        ban: {
+          data: { name: 'ban', description: 'Ban', permissions: ['BAN_MEMBERS'] },
+          permissions: ['BAN_MEMBERS'],
+          execute: async () => {},
+        },
+      },
+      guildMember: { roles: ['r1'] },
+      roles: [{ id: 'r1', permissions: '0' }],
+    });
+    const responses = [];
+    client.createInteractionResponse = async (id, tok, body) => {
+      responses.push(body);
+    };
+
+    await handleInteraction(
+      client,
+      createMockInteraction({
+        data: { name: 'ban', options: [] },
+        member: { roles: ['r1'], user: { id: USER_ID } },
+      }),
+    );
+    assert.ok(responses.some((r) => r.data?.content?.includes('do not have permission')));
+  });
+
+  it('ADMINISTRATOR bypasses permission check', async () => {
+    const executed = [];
+    const client = createMockClient({
+      commands: {
+        ban: {
+          data: { name: 'ban', description: 'Ban', permissions: ['BAN_MEMBERS'] },
+          permissions: ['BAN_MEMBERS'],
+          execute: async () => {
+            executed.push(1);
+          },
+        },
+      },
+      guildMember: { roles: ['r1'] },
+      roles: [{ id: 'r1', permissions: '8' }],
+    });
+    client.createInteractionResponse = async () => {};
+
+    await handleInteraction(
+      client,
+      createMockInteraction({
+        data: { name: 'ban', options: [] },
+        member: { roles: ['r1'], user: { id: USER_ID } },
+      }),
+    );
+    assert.strictEqual(executed.length, 1);
+  });
+
+  it('warns on unknown permission name', async () => {
+    const warns = [];
+    const client = createMockClient({
+      commands: {
+        x: {
+          data: { name: 'x', description: 'x', permissions: ['FAKE_PERM'] },
+          permissions: ['FAKE_PERM'],
+          execute: async () => {},
+        },
+      },
+      guildMember: { roles: ['r1'] },
+      roles: [{ id: 'r1', permissions: '0' }],
+    });
+    client.logger.warn = (...a) => {
+      warns.push(a);
+    };
+    client.createInteractionResponse = async () => {};
+
+    await handleInteraction(
+      client,
+      createMockInteraction({
+        data: { name: 'x', options: [] },
+        member: { roles: ['r1'], user: { id: USER_ID } },
+      }),
+    );
+    assert.ok(warns.some((w) => w.some((a) => typeof a === 'string' && a.includes('Unknown permission'))));
+  });
+});
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+describe('interaction_create rate limiting', () => {
+  it('sends rate limit response after DEFAULT threshold', async () => {
+    const client = createMockClient({
+      commands: {
+        ping: { data: { name: 'ping', description: 'x' }, execute: async () => {}, permissions: [] },
+      },
+    });
+    const responses = [];
+    client.createInteractionResponse = async (id, tok, body) => {
+      responses.push(body);
+    };
+
+    for (let i = 0; i < 6; i++) {
+      await handleInteraction(client, createMockInteraction({ data: { name: 'ping', options: [] } }));
+    }
+    assert.ok(responses.some((r) => r.data?.content?.includes('slow down')));
+  });
+
+  it('silently drops when already notified', async () => {
+    const client = createMockClient({
+      commands: {
+        ping: { data: { name: 'ping', description: 'x' }, execute: async () => {}, permissions: [] },
+      },
+    });
+    const responses = [];
+    client.createInteractionResponse = async (id, tok, body) => {
+      responses.push(body);
+    };
+
+    for (let i = 0; i < 7; i++) {
+      await handleInteraction(client, createMockInteraction({ data: { name: 'ping', options: [] } }));
+    }
+    const noticeCount = responses.filter((r) => r.data?.content?.includes('slow down')).length;
+    assert.strictEqual(noticeCount, 1);
+  });
+});
+
+// ── mockMessage shim ──────────────────────────────────────────────────────────
+describe('interaction_create mockMessage shim', () => {
+  it('reply() uses createInteractionResponse (non-deferred)', async () => {
+    const responses = [];
+    const client = createMockClient({
+      commands: {
+        ping: {
+          data: { name: 'ping', description: 'x' },
+          execute: async (c, msg) => {
+            await msg.reply('pong');
+          },
+          permissions: [],
+        },
+      },
+    });
+    client.createInteractionResponse = async (id, tok, body) => {
+      responses.push(body);
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'ping', options: [] } }));
+    assert.ok(responses.some((r) => r.type === 4 && r.data?.content === 'pong'));
+  });
+
+  it('defer() + reply() uses editOriginalInteractionResponse', async () => {
+    const edits = [];
+    const client = createMockClient({
+      commands: {
+        slow: {
+          data: { name: 'slow', description: 'x' },
+          execute: async (c, msg) => {
+            await msg.defer();
+            await msg.reply('done');
+          },
+          permissions: [],
+        },
+      },
+    });
+    client.createInteractionResponse = async () => {};
+    client.editOriginalInteractionResponse = async (appId, tok, body) => {
+      edits.push(body);
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'slow', options: [] } }));
+    assert.ok(edits.some((e) => e.content === 'done'));
+  });
+
+  it('command error: logs and edits if deferred', async () => {
+    const errors = [];
+    const edits = [];
+    const client = createMockClient({
+      commands: {
+        boom: {
+          data: { name: 'boom', description: 'x' },
+          execute: async (c, msg) => {
+            await msg.defer();
+            throw new Error('cmd failed');
+          },
+          permissions: [],
+        },
+      },
+    });
+    client.logger.error = (...a) => {
+      errors.push(a);
+    };
+    client.createInteractionResponse = async () => {};
+    client.editOriginalInteractionResponse = async (appId, tok, body) => {
+      edits.push(body);
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'boom', options: [] } }));
+    assert.ok(errors.length > 0);
+    assert.ok(edits.some((e) => e.content?.includes('error')));
+  });
+
+  it('command error: non-deferred just logs', async () => {
+    const errors = [];
+    const client = createMockClient({
+      commands: {
+        boom: {
+          data: { name: 'boom', description: 'x' },
+          execute: async () => {
+            throw new Error('boom');
+          },
+          permissions: [],
+        },
+      },
+    });
+    client.logger.error = (...a) => {
+      errors.push(a);
+    };
+    client.createInteractionResponse = async () => {};
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'boom', options: [] } }));
+    assert.ok(errors.length > 0);
+  });
 });
