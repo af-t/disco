@@ -32,6 +32,13 @@ const RECONNECT_DELAY = parseInt(process.env.DISCORD_RECONNECT_DELAY, 10) || 500
 const RECONNECT_LIMIT = parseInt(process.env.DISCORD_RECONNECT_LIMIT, 10) || 5;
 const RECONNECT_MAX_DELAY = 300_000; // 5 minutes cap
 
+export {
+  GATEWAY as _TEST_GATEWAY_URL,
+  INTENT_BITS as _TEST_INTENT_BITS,
+  RECONNECT_DELAY as _TEST_RECONNECT_DELAY,
+  RECONNECT_LIMIT as _TEST_RECONNECT_LIMIT,
+};
+
 class DiscordClient extends EventEmitter {
   _initPromise = null;
   _session = {};
@@ -114,7 +121,7 @@ class DiscordClient extends EventEmitter {
     const onClose = this._onClose.bind(this);
 
     const onMessageWrapper = (event) => {
-      // builtin delivers ArrayBuffer when binaryType=arraybuffer; legacy code expects Buffer
+      // ArrayBuffer -> Buffer for legacy paths
       const data = typeof event.data === 'string' ? event.data : Buffer.from(event.data);
       onMessageRaw(data);
     };
@@ -126,7 +133,7 @@ class DiscordClient extends EventEmitter {
     ws.addEventListener('error', onErrorWrapper);
     ws.addEventListener('close', onCloseWrapper);
 
-    // snapshot socket so remover targets the right instance
+    // avoid stale socket on reconnect
     ws._removeListeners = () => {
       ws.removeEventListener('open', onOpen);
       ws.removeEventListener('message', onMessageWrapper);
@@ -175,7 +182,7 @@ class DiscordClient extends EventEmitter {
   }
 
   _onOpen() {
-    // _socket is ws-specific; builtin exposes no TCP handle
+    // builtin WS has no raw TCP socket
     this._ws._socket?.setNoDelay?.(true);
     this.emit('OPEN');
   }
@@ -305,7 +312,6 @@ class DiscordClient extends EventEmitter {
   }
 
   _onError(err) {
-    // stash message so _onClose can include it in the reason string
     this._lastErrorMessage = err?.message;
     this.emit('ERROR', err);
   }

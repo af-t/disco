@@ -472,7 +472,6 @@ class StoreClient extends StoreBase {
       ws.binaryType = 'arraybuffer';
       this._ws = ws;
 
-      // Bookkeep so listeners can be torn down cleanly
       const wsListeners = [];
       const on = (type, listener) => {
         ws.addEventListener(type, listener);

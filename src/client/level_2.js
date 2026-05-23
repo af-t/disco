@@ -5,6 +5,8 @@ const BASE_URL = process.env.DISCORD_API_BASE || 'https://discord.com/api/v10';
 const MAX_RETRIES = parseInt(process.env.DISCORD_MAX_RETRIES, 10) || 3;
 const RATELIMIT_MAX_DELAY = 300_000; // 5 minutes cap
 
+export { BASE_URL as _TEST_BASE_URL, MAX_RETRIES as _TEST_MAX_RETRIES };
+
 class DiscordClient extends level1 {
   async makeRequest(method, endpoint, body, headers = {}) {
     if (!this._initialised) throw new Error('call ready() first');

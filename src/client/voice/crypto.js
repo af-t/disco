@@ -12,7 +12,6 @@ const AEAD_TAG_LEN = 16;
 const AEAD_SUFFIX_LEN = 4;
 const NACL_NONCE_LEN = 24;
 
-// Build 12-byte IETF nonce from 32-bit counter (zero-prefixed)
 function aeadNonce(counter) {
   const nonce = Buffer.alloc(12);
   nonce.writeUInt32BE(counter, 0);
@@ -51,7 +50,6 @@ function decryptAesGcm(secretKey, packet, headerLen) {
   }
 }
 
-// xsalsa20_poly1305_lite: inline 4-byte nonce + secretbox
 function encryptXsalsaLite(secretKey, frame, counter) {
   const nonce = Buffer.alloc(NACL_NONCE_LEN);
   nonce.writeUInt32BE(counter, 0);
@@ -63,8 +61,7 @@ function encryptXsalsaLite(secretKey, frame, counter) {
 }
 
 function decryptXsalsaLite(secretKey, packet, headerLen) {
-  const minLen = headerLen + AEAD_SUFFIX_LEN + 16; // nonce + min secretbox overhead
-  if (packet.length < minLen) return null;
+  if (packet.length < headerLen + AEAD_SUFFIX_LEN + 16) return null;
   const nonce = Buffer.alloc(NACL_NONCE_LEN);
   packet.copy(nonce, 0, headerLen, headerLen + AEAD_SUFFIX_LEN);
   const sealed = packet.subarray(headerLen + AEAD_SUFFIX_LEN);
@@ -83,8 +80,7 @@ function decryptXsalsaSuffix(secretKey, packet, headerLen) {
 
 function decryptXsalsaFull(secretKey, packet, headerLen) {
   const sealed = packet.subarray(headerLen);
-  if (sealed.length < 16) return null; // need at least auth tag
-  // Discord spec: nonce = RTP header (12 bytes) || 12 zero bytes
+  if (sealed.length < 16) return null;
   const nonce = Buffer.alloc(NACL_NONCE_LEN);
   packet.copy(nonce, 0, 0, 12);
   const opened = nacl.secretbox.open(sealed, nonce, secretKey);
