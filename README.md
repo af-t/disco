@@ -14,7 +14,7 @@ A modular and extendable Discord bot built with Node.js, designed for server man
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18 or higher)
+- [Node.js](https://nodejs.org/) (>= 22.3.0)
 - [npm](https://www.npmjs.com/)
 - A [Discord Application](https://discord.com/developers/applications) with a bot token
 

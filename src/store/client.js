@@ -1,4 +1,3 @@
-import WebSocket from 'ws';
 import { serialize, deserialize } from 'node:v8';
 import StoreBase from './base.js';
 
@@ -24,6 +23,7 @@ class StoreClient extends StoreBase {
 
     this.url = config?.url || 'ws://localhost:3000';
     this.config = config;
+    this._WebSocketImpl = config?.webSocketImpl ?? globalThis.WebSocket;
 
     this.serverTTL = this._validateInt(config.serverTTL) ?? 1_200_000;
   }
@@ -154,7 +154,7 @@ class StoreClient extends StoreBase {
     return {
       uptime: this._formatDuration(uptime),
       uptimeMs: uptime,
-      connected: this._ws?.readyState === WebSocket.OPEN,
+      connected: this._ws?.readyState === this._WebSocketImpl.OPEN,
       operations: {
         ...this._stats.operations,
         total: Object.values(this._stats.operations).reduce((a, b) => a + b, 0),
@@ -466,13 +466,27 @@ class StoreClient extends StoreBase {
 
     return new Promise((resolve) => {
       this._log('info', `connecting to storage server at ${this.url}`);
-      this._ws = new WebSocket(this.url);
+      this._lastErrorMessage = null;
 
-      this._ws.on('open', async () => {
+      const ws = new this._WebSocketImpl(this.url);
+      ws.binaryType = 'arraybuffer';
+      this._ws = ws;
+
+      // Bookkeep so listeners can be torn down cleanly
+      const wsListeners = [];
+      const on = (type, listener) => {
+        ws.addEventListener(type, listener);
+        wsListeners.push({ type, listener });
+      };
+      const removeAll = () => {
+        for (const { type, listener } of wsListeners) ws.removeEventListener(type, listener);
+        wsListeners.length = 0;
+      };
+
+      on('open', async () => {
         this._connecting = false;
-        this._retryAttempt = 0; // reset on successful connection (fixes B3)
+        this._retryAttempt = 0;
         try {
-          this._ws._socket.setNoDelay(true);
           // server uses its own diskPath, not ours
           const serverConfig = { ...this.config };
           delete serverConfig.diskPath;
@@ -485,20 +499,22 @@ class StoreClient extends StoreBase {
         resolve();
       });
 
-      this._ws.on('error', (err) => {
+      on('error', (event) => {
         this._connecting = false;
         if (this._ws) {
-          this._ws.removeAllListeners();
-          this._ws.terminate();
+          removeAll();
+          ws.close();
           this._ws = null;
         }
-        this._log('warn', `server connection error: ${err.message}`);
+        const msg = event.message ?? event.error?.message ?? 'unknown';
+        this._log('warn', `server connection error: ${msg}`);
         this._retryAttempt++;
         this._scheduleRetry(resolve);
       });
 
-      this._ws.on('message', (buffer) => {
+      on('message', (event) => {
         try {
+          const buffer = Buffer.from(event.data);
           const response = deserialize(buffer);
           const { id, data } = response;
 
@@ -512,10 +528,10 @@ class StoreClient extends StoreBase {
         }
       });
 
-      this._ws.on('close', () => {
+      on('close', (_event) => {
         this._connecting = false;
         if (this._ws) {
-          this._ws.removeAllListeners();
+          removeAll();
           this._ws = null;
         }
         if (this._reconnect) {
@@ -530,7 +546,7 @@ class StoreClient extends StoreBase {
   }
 
   _send(op, args = []) {
-    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+    if (!this._ws || this._ws.readyState !== this._WebSocketImpl.OPEN) {
       return Promise.reject(new Error('WebSocket not connected'));
     }
 
@@ -560,11 +576,11 @@ class StoreClient extends StoreBase {
       }, 30000);
 
       const payload = JSON.stringify({ op, id, args });
-      this._ws.send(payload, (err) => {
-        if (err) {
-          settle(reject, err);
-        }
-      });
+      try {
+        this._ws.send(payload);
+      } catch (err) {
+        settle(reject, err);
+      }
     });
   }
 }

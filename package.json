@@ -32,8 +32,10 @@
     "url": "https://github.com/af-t/disco/issues"
   },
   "homepage": "https://github.com/af-t/disco#readme",
+  "engines": {
+    "node": ">=22.3.0"
+  },
   "dependencies": {
-    "dotenv": "^17.4.2",
     "openrouter": "github:af-t/openrouter#v1.2.0",
     "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",

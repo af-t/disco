@@ -1,7 +1,6 @@
 import level3 from './level_3.js';
 import dgram from 'node:dgram';
 import nacl from 'tweetnacl';
-import { WebSocket } from 'ws';
 
 // ---- Voice WebSocket opcodes ----
 const VOICE_OP = {
@@ -131,14 +130,22 @@ class VoiceConnection {
 
     const wsUrl = `wss://${endpoint.replace(/:80$/, '')}?v=8`;
     this.ws = new WebSocket(wsUrl);
-    this.ws.on('open', () => this._onVoiceWsOpen(token));
-    this.ws.on('message', this._onVoiceWsMessage);
-    this.ws.on('close', this._onVoiceWsClose);
-    this.ws.on('error', this._onVoiceWsError);
+    this.ws.binaryType = 'arraybuffer';
+
+    const onVoiceOpen = () => this._onVoiceWsOpen(token);
+    const onVoiceClose = (event) => this._onVoiceWsClose(event.code, event.reason);
+    const onVoiceError = (event) => this._onVoiceWsError(event.error ?? new Error(event.message));
+
+    this.ws.addEventListener('open', onVoiceOpen);
+    this.ws.addEventListener('message', (event) => {
+      const data = typeof event.data === 'string' ? event.data : Buffer.from(event.data);
+      this._onVoiceWsMessage(data);
+    });
+    this.ws.addEventListener('close', onVoiceClose);
+    this.ws.addEventListener('error', onVoiceError);
   }
 
   _onVoiceWsOpen(token) {
-    this.ws._socket?.setNoDelay?.(true);
     this._sendVoiceOp(VOICE_OP.IDENTIFY, {
       server_id: this.guildId,
       user_id: this.client._session.user.id,
@@ -374,7 +381,7 @@ class VoiceConnection {
 
     if (!this.ackReceived) {
       this.client.logger?.warn?.(`Voice zombie detected [${this.guildId}], terminating.`);
-      this.ws.terminate();
+      this.ws.close();
       return;
     }
 
@@ -411,7 +418,6 @@ class VoiceConnection {
     this._clearVoiceHeartbeat();
 
     if (this.ws) {
-      this.ws.removeAllListeners();
       if (this.ws.readyState < WebSocket.CLOSING) {
         this.ws.close(1000, 'leaving voice');
       }

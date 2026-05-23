@@ -4,12 +4,7 @@ import { MSG } from './ipc.js';
 import { getExecutor } from './tools/index.js';
 
 function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
+  const { promise, resolve, reject } = Promise.withResolvers();
   const d = { promise, settled: false };
   d.resolve = (v) => {
     d.settled = true;

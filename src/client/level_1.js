@@ -1,6 +1,5 @@
 import StorageManager from '../store/client.js';
 import zlib from 'node:zlib';
-import { WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
 
 import intentBits from '../lib/intents.js';
@@ -97,19 +96,43 @@ class DiscordClient extends EventEmitter {
 
     // tear down stale socket before reopening
     if (this._ws) {
-      this._ws.removeAllListeners();
-      if (this._ws.readyState < WebSocket.CLOSING) this._ws.terminate();
+      this._ws._removeListeners?.();
+      if (this._ws.readyState < WebSocket.CLOSING) this._ws.close();
       this._ws = null;
     }
 
+    this._lastErrorMessage = null;
     this._ws = new WebSocket(this._gatewayUrl + this._gatewayParams);
+    this._ws.binaryType = 'arraybuffer';
     this.emit('CONNECT');
     this.status = 'connecting';
 
-    this._ws.on('open', this._onOpen.bind(this));
-    this._ws.on('message', this._onMessage.bind(this));
-    this._ws.on('error', this._onError.bind(this));
-    this._ws.on('close', this._onClose.bind(this));
+    const ws = this._ws;
+    const onOpen = this._onOpen.bind(this);
+    const onMessageRaw = this._onMessage.bind(this);
+    const onError = this._onError.bind(this);
+    const onClose = this._onClose.bind(this);
+
+    const onMessageWrapper = (event) => {
+      // builtin delivers ArrayBuffer when binaryType=arraybuffer; legacy code expects Buffer
+      const data = typeof event.data === 'string' ? event.data : Buffer.from(event.data);
+      onMessageRaw(data);
+    };
+    const onErrorWrapper = (event) => onError(event.error ?? new Error(event.message));
+    const onCloseWrapper = (event) => onClose(event.code, event.reason);
+
+    ws.addEventListener('open', onOpen);
+    ws.addEventListener('message', onMessageWrapper);
+    ws.addEventListener('error', onErrorWrapper);
+    ws.addEventListener('close', onCloseWrapper);
+
+    // snapshot socket so remover targets the right instance
+    ws._removeListeners = () => {
+      ws.removeEventListener('open', onOpen);
+      ws.removeEventListener('message', onMessageWrapper);
+      ws.removeEventListener('error', onErrorWrapper);
+      ws.removeEventListener('close', onCloseWrapper);
+    };
   }
 
   /**
@@ -126,7 +149,7 @@ class DiscordClient extends EventEmitter {
     this._clearHeartbeat();
 
     if (this._ws) {
-      this._ws.removeAllListeners();
+      this._ws._removeListeners?.();
       this._ws.close(1000, 'Client destroyed');
       this._ws = null;
     }
@@ -152,7 +175,8 @@ class DiscordClient extends EventEmitter {
   }
 
   _onOpen() {
-    this._ws._socket.setNoDelay(true);
+    // _socket is ws-specific; builtin exposes no TCP handle
+    this._ws._socket?.setNoDelay?.(true);
     this.emit('OPEN');
   }
 
@@ -169,7 +193,7 @@ class DiscordClient extends EventEmitter {
           this._handleDispatch(t, d);
           break;
         case 7: // Server-requested reconnect — keep session, reconnect with resume
-          this._ws.terminate();
+          this._ws.close();
           break;
         case 9: // Invalid session
           // d=true resumable, d=false start fresh
@@ -242,10 +266,10 @@ class DiscordClient extends EventEmitter {
   }
 
   async _onClose(code, reason) {
-    const reasonStr = reason?.toString() || this._ws?._closeReason || 'no reason';
+    const reasonStr = reason?.toString() || this._lastErrorMessage || 'no reason';
     this.emit('CLOSE', code, reasonStr);
 
-    this._ws?.removeAllListeners();
+    this._ws?._removeListeners?.();
     this._clearHeartbeat();
     this.status = 'closed';
 
@@ -281,7 +305,8 @@ class DiscordClient extends EventEmitter {
   }
 
   _onError(err) {
-    this._ws._closeReason = err.message;
+    // stash message so _onClose can include it in the reason string
+    this._lastErrorMessage = err?.message;
     this.emit('ERROR', err);
   }
 
@@ -295,7 +320,7 @@ class DiscordClient extends EventEmitter {
       } else {
         console.warn(msg);
       }
-      this._ws.terminate();
+      this._ws.close();
       return;
     }
 
@@ -334,7 +359,7 @@ class DiscordClient extends EventEmitter {
     this._gatewayUrl = GATEWAY;
     this._session.id = null;
     this._session.seq = null;
-    this._ws.terminate();
+    this._ws.close();
   }
 
   _resume() {

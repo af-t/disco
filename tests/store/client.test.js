@@ -1,31 +1,57 @@
 import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import EventEmitter from 'node:events';
-import WebSocket from 'ws';
 import StoreClient from '../../src/store/client.js';
 import { serialize, deserialize } from 'node:v8';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockWs(readyState = WebSocket.OPEN) {
-  const ws = new EventEmitter();
-  ws.readyState = readyState;
-  // auto-respond with null data so _send resolves without hanging
-  ws.send = (payload, cb) => {
-    if (cb) cb();
-    try {
-      const { id } = JSON.parse(payload);
-      setImmediate(() => ws.emit('message', serialize({ id, data: null })));
-    } catch {}
+function makeMockWs(readyState = 1) {
+  // 1 = OPEN, matches WebSocket.OPEN
+  const listeners = new Map();
+
+  const ws = {
+    readyState,
+    binaryType: 'arraybuffer',
+    sent: [],
+    closed: false,
+    closeCode: null,
+    closeReason: '',
+
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(fn);
+    },
+
+    removeEventListener(type, fn) {
+      listeners.get(type)?.delete(fn);
+    },
+
+    dispatch(type, detail) {
+      // Build an event-like object. For 'message', event.data is the payload.
+      const event = { type, ...detail };
+      for (const fn of listeners.get(type) ?? []) fn(event);
+    },
+
+    send(payload) {
+      this.sent.push(payload);
+      try {
+        const { id } = JSON.parse(payload);
+        setImmediate(() => this.dispatch('message', { data: serialize({ id, data: null }) }));
+      } catch {}
+    },
+
+    close(code = 1000, reason = '') {
+      this.closed = true;
+      this.closeCode = code;
+      this.closeReason = reason;
+      this.readyState = 3; // CLOSED
+    },
   };
-  ws.close = () => {};
-  ws.terminate = () => {};
-  ws.removeAllListeners = () => {};
-  ws._socket = { setNoDelay: () => {} };
+
   return ws;
 }
 
-function makeClient(wsReadyState = WebSocket.OPEN) {
+function makeClient(wsReadyState = 1) {
   const client = new StoreClient({ url: 'ws://mock' });
   const ws = makeMockWs(wsReadyState);
   client._ws = ws;
@@ -34,8 +60,9 @@ function makeClient(wsReadyState = WebSocket.OPEN) {
   client._startQueueWorker();
 
   // mirror the real message handler that connect() would install
-  ws.on('message', (buffer) => {
+  ws.addEventListener('message', (event) => {
     try {
+      const buffer = Buffer.from(event.data);
       const { id, data } = deserialize(buffer);
       const entry = client._pendingRequests.get(id);
       if (entry) {
@@ -59,13 +86,12 @@ describe('StoreClient connect and send/receive', () => {
 
   it('sends a GET and receives a response', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { op, id } = JSON.parse(payload);
       setTimeout(() => {
         const data = op === 'get' ? 'pong' : null;
-        ws.emit('message', serialize({ id, data }));
+        ws.dispatch('message', { data: serialize({ id, data }) });
       }, 10);
-      if (cb) cb();
     };
     const result = await client.get('test');
     assert.strictEqual(result, 'pong');
@@ -191,12 +217,11 @@ describe('StoreClient _createTask GET', () => {
 
   it('server fallback success: promotes to memory', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { op, id } = JSON.parse(payload);
       setTimeout(() => {
-        ws.emit('message', serialize({ id, data: op === 'get' ? 'from-server' : null }));
+        ws.dispatch('message', { data: serialize({ id, data: op === 'get' ? 'from-server' : null }) });
       }, 5);
-      if (cb) cb();
     };
     const result = await client.get('server-key');
     assert.strictEqual(result, 'from-server');
@@ -207,10 +232,9 @@ describe('StoreClient _createTask GET', () => {
 
   it('server fallback returns null: miss, returns undefined, no promotion', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { id } = JSON.parse(payload);
-      setTimeout(() => ws.emit('message', serialize({ id, data: null })), 5);
-      if (cb) cb();
+      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: null }) }), 5);
     };
     const result = await client.get('missing');
     assert.strictEqual(result, undefined);
@@ -259,13 +283,11 @@ describe('StoreClient _createTask CLEAR', () => {
   it('swallows _send error, still clears', async () => {
     const { client, ws } = makeClient();
     await client.set('k', 'v');
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { op } = JSON.parse(payload);
       if (op === 'clear') {
-        if (cb) cb(new Error('send failed'));
-        return;
+        throw new Error('send failed');
       }
-      if (cb) cb();
     };
     await client.clear();
     assert.strictEqual(client._metadata.size, 0);
@@ -301,13 +323,12 @@ describe('StoreClient _createTask HAS/METADATA/ATTR', () => {
 
   it('setAttr/getAttr when WS connected', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { op, id } = JSON.parse(payload);
       setTimeout(() => {
         const data = op === 'get-attr' ? 'attr-value' : true;
-        ws.emit('message', serialize({ id, data }));
+        ws.dispatch('message', { data: serialize({ id, data }) });
       }, 5);
-      if (cb) cb();
     };
     const set = await client.setAttr('myattr', 'val');
     assert.strictEqual(set, true);
@@ -358,10 +379,9 @@ describe('StoreClient _createTask unknown action', () => {
 describe('StoreClient _demote', () => {
   it('moves item to SERVER on success', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { id } = JSON.parse(payload);
-      setTimeout(() => ws.emit('message', serialize({ id, data: true })), 5);
-      if (cb) cb();
+      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: true }) }), 5);
     };
     await client.set('k', 'v');
     await client._demote('k');
@@ -391,10 +411,9 @@ describe('StoreClient _demote', () => {
 
   it('uses customTTL for expired when present', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { id } = JSON.parse(payload);
-      setTimeout(() => ws.emit('message', serialize({ id, data: true })), 5);
-      if (cb) cb();
+      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: true }) }), 5);
     };
     await client.set('k', 'v', { ttl: 9999 });
     const before = Date.now();
@@ -410,11 +429,10 @@ describe('StoreClient _deleteFromBackend', () => {
   it('calls _send delete for SERVER location', async () => {
     const { client, ws } = makeClient();
     const ops = [];
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const parsed = JSON.parse(payload);
       ops.push(parsed.op);
-      setTimeout(() => ws.emit('message', serialize({ id: parsed.id, data: null })), 5);
-      if (cb) cb();
+      setTimeout(() => ws.dispatch('message', { data: serialize({ id: parsed.id, data: null }) }), 5);
     };
     await client._deleteFromBackend('k', { location: 1 });
     assert.ok(ops.includes('delete'));
@@ -474,10 +492,10 @@ describe('StoreClient _send', () => {
     await assert.rejects(() => client._send('get', ['k']), /WebSocket not connected/);
   });
 
-  it('rejects when ws.send callback receives error', async () => {
+  it('rejects when ws.send throws', async () => {
     const { client, ws } = makeClient();
-    ws.send = (_payload, cb) => {
-      if (cb) cb(new Error('send failed'));
+    ws.send = () => {
+      throw new Error('send failed');
     };
     await assert.rejects(() => client._send('get', ['k']), { message: 'send failed' });
     stopClient(client);
@@ -487,9 +505,7 @@ describe('StoreClient _send', () => {
     mock.timers.enable({ apis: ['setTimeout'] });
     const { client, ws } = makeClient();
     // ws.send succeeds but never emits a response
-    ws.send = (_payload, cb) => {
-      if (cb) cb();
-    };
+    ws.send = (_payload) => {};
 
     const sendPromise = client._send('get', ['k']);
     const rejectPromise = assert.rejects(sendPromise, /Request timed out/);
@@ -516,10 +532,9 @@ describe('StoreClient close', () => {
       drained.push('task');
     });
     // _demoteAll will call _send; mock it to succeed
-    ws.send = (payload, cb) => {
+    ws.send = (payload) => {
       const { id } = JSON.parse(payload);
-      setTimeout(() => ws.emit('message', serialize({ id, data: true })), 5);
-      if (cb) cb();
+      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: true }) }), 5);
     };
     const result = await client.close();
     assert.strictEqual(result, true);

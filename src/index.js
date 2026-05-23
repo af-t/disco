@@ -2,14 +2,15 @@ import Discord from './client/level_4.js';
 import Store from './store/client.js';
 import tools from './lib/utility.js';
 import * as ai from './ai/index.js';
-import dotenv from 'dotenv';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-dotenv.config();
+try {
+  process.loadEnvFile('.env');
+} catch {
+  // .env is optional in production deployments
+}
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = import.meta.dirname;
 
 const DATABASE_PATH = join(__dirname, '..', 'database');
 const COMMANDS_PATH = join(__dirname, '..', 'src', 'commands');
