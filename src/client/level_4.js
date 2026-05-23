@@ -1,6 +1,6 @@
 import level3 from './level_3.js';
 import dgram from 'node:dgram';
-import nacl from 'tweetnacl';
+import { encrypt, decrypt, PREFERRED_MODES } from './voice/crypto.js';
 
 // ---- Voice WebSocket opcodes ----
 const VOICE_OP = {
@@ -16,26 +16,6 @@ const VOICE_OP = {
   RESUMED: 9,
   CLIENT_DISCONNECT: 13,
 };
-
-// ---- Encryption mode nonce builders ----
-function makeNonceLite(header) {
-  const nonce = Buffer.alloc(24);
-  nonce.writeUInt32BE(header.readUInt32BE(0), 0);
-  return nonce;
-}
-
-function makeNonceSuffix(packet) {
-  const nonce = Buffer.alloc(24);
-  packet.copy(nonce, 0, packet.length - 24);
-  return nonce;
-}
-
-function makeNonceFull(header, data) {
-  const nonce = Buffer.alloc(24);
-  header.copy(nonce, 0, 0, 12);
-  data.copy(nonce, 12, 0, 12);
-  return nonce;
-}
 
 // ---- RTP helpers ----
 const RTP_HEADER_LEN = 12;
@@ -89,6 +69,7 @@ class VoiceConnection {
     this.timestamp = Math.floor(Math.random() * 4294967295);
     this._audioCallbacks = [];
     this._speakingCallback = null; // store ref for cleanup (fixes B2)
+    this._aeadNonceCounter = 0;
 
     // Bind
     this._onVoiceWsOpen = this._onVoiceWsOpen.bind(this);
@@ -176,6 +157,7 @@ class VoiceConnection {
       case VOICE_OP.SESSION_DESCRIPTION:
         this.secretKey = Buffer.from(data.d.secret_key);
         this.mode = data.d.mode;
+        this._aeadNonceCounter = 0;
         this.ready = true;
         this.client.emit('VOICE_CONNECT', { guild_id: this.guildId, channel_id: this.channelId });
         break;
@@ -257,8 +239,7 @@ class VoiceConnection {
   }
 
   _selectProtocol(ip, port) {
-    const preferredModes = ['xsalsa20_poly1305_lite', 'xsalsa20_poly1305_suffix', 'xsalsa20_poly1305'];
-    const mode = preferredModes.find((m) => this._modes.includes(m)) || this._modes[0];
+    const mode = PREFERRED_MODES.find((m) => this._modes.includes(m)) || this._modes[0];
 
     this._sendVoiceOp(VOICE_OP.SELECT_PROTOCOL, {
       protocol: 'udp',
@@ -279,23 +260,7 @@ class VoiceConnection {
       const rtp = readRtpHeader(packet);
       const headerLen = RTP_HEADER_LEN + (rtp.hasExt ? RTP_EXTENSION_LEN : 0);
 
-      let encryptedData;
-      let nonce;
-
-      if (this.mode === 'xsalsa20_poly1305_lite') {
-        nonce = makeNonceLite(packet.subarray(headerLen, headerLen + 4));
-        encryptedData = packet.subarray(headerLen + 4);
-      } else if (this.mode === 'xsalsa20_poly1305_suffix') {
-        if (packet.length < headerLen + 24 + 16) return;
-        encryptedData = packet.subarray(headerLen, packet.length - 24);
-        nonce = makeNonceSuffix(packet);
-      } else {
-        // xsalsa20_poly1305
-        encryptedData = packet.subarray(headerLen);
-        nonce = makeNonceFull(rtp.header, encryptedData);
-      }
-
-      const decrypted = nacl.secretbox.open(encryptedData, nonce, this.secretKey);
+      const decrypted = decrypt(this.mode, this.secretKey, packet, headerLen);
       if (!decrypted) return;
 
       const audioFrame = {
@@ -304,7 +269,7 @@ class VoiceConnection {
         ssrc: rtp.ssrc,
         sequence: rtp.seq,
         timestamp: rtp.ts,
-        frame: Buffer.from(decrypted),
+        frame: decrypted,
       };
 
       this.client.emit('VOICE_AUDIO', audioFrame);
@@ -342,18 +307,25 @@ class VoiceConnection {
     const header = buildRtpHeader(this.ssrc, seq, ts);
 
     // Encrypt
-    const nonce = Buffer.alloc(24);
-    nonce.writeUInt32BE(seq, 0); // lite mode nonce
+    const counter = ++this._aeadNonceCounter;
+    let prefix;
+    let blob;
 
-    const encrypted = nacl.secretbox(frame, nonce, this.secretKey);
-    if (!encrypted) return;
+    if (this.mode === 'aead_aes256_gcm_rtpsize') {
+      prefix = header;
+      blob = encrypt(this.mode, this.secretKey, prefix, frame, counter);
+    } else if (this.mode === 'xsalsa20_poly1305_lite') {
+      const extHeader = Buffer.alloc(RTP_EXTENSION_LEN);
+      extHeader.writeUInt16BE(0xbede, 0);
+      extHeader.writeUInt16BE(1, 2);
+      prefix = Buffer.concat([header, extHeader]);
+      blob = encrypt(this.mode, this.secretKey, prefix, frame, counter);
+    } else {
+      return; // unsupported send mode
+    }
 
-    // RTP header + lite ext + ciphertext
-    const extHeader = Buffer.alloc(RTP_EXTENSION_LEN);
-    extHeader.writeUInt16BE(0xbede, 0); // profile ID
-    extHeader.writeUInt16BE(1, 2); // extensions count
-
-    const packet = Buffer.concat([header, extHeader, nonce.subarray(0, 4), encrypted]);
+    if (!blob) return;
+    const packet = Buffer.concat([prefix, blob]);
 
     this.udp.send(packet, this._port, this._ip, (err) => {
       if (err) this.client.logger?.error?.('UDP send failed:', err.message);
