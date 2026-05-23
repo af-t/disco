@@ -70,6 +70,7 @@ class VoiceConnection {
     this._audioCallbacks = [];
     this._speakingCallback = null; // store ref for cleanup (fixes B2)
     this._aeadNonceCounter = 0;
+    this._sendModeWarned = false;
 
     // Bind
     this._onVoiceWsOpen = this._onVoiceWsOpen.bind(this);
@@ -158,6 +159,7 @@ class VoiceConnection {
         this.secretKey = Buffer.from(data.d.secret_key);
         this.mode = data.d.mode;
         this._aeadNonceCounter = 0;
+        this._sendModeWarned = false;
         this.ready = true;
         this.client.emit('VOICE_CONNECT', { guild_id: this.guildId, channel_id: this.channelId });
         break;
@@ -321,7 +323,13 @@ class VoiceConnection {
       prefix = Buffer.concat([header, extHeader]);
       blob = encrypt(this.mode, this.secretKey, prefix, frame, counter);
     } else {
-      return; // unsupported send mode
+      if (!this._sendModeWarned) {
+        this._sendModeWarned = true;
+        this.client.logger?.warn?.(
+          `Voice send path does not support negotiated mode "${this.mode}" [guild ${this.guildId}]; audio playback is a no-op until a supported mode is offered.`,
+        );
+      }
+      return;
     }
 
     if (!blob) return;
