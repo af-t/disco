@@ -46,8 +46,11 @@ const permissionFlags = {
   CREATE_EVENTS: 1n << 44n,
   USE_EXTERNAL_SOUNDS: 1n << 45n,
   SEND_VOICE_MESSAGES: 1n << 46n,
+  SET_VOICE_CHANNEL_STATUS: 1n << 48n,
   SEND_POLLS: 1n << 49n,
   USE_EXTERNAL_APPS: 1n << 50n,
+  PIN_MESSAGES: 1n << 51n,
+  BYPASS_SLOWMODE: 1n << 52n,
 };
 
 export default permissionFlags;

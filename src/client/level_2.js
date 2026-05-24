@@ -17,6 +17,7 @@ class DiscordClient extends level1 {
       headers: {
         Authorization: `Bot ${this.token}`,
         'Content-Type': 'application/json',
+        'User-Agent': 'DiscordBot (https://github.com/af-t/disco, 1.2.1)',
         ...headers,
       },
     };
@@ -107,11 +108,11 @@ class DiscordClient extends level1 {
   }
 
   async editChannelPermission(channel_id, overwrite_id, options = {}) {
-    return this.makeRequest('PATCH', `/channels/${channel_id}/permissions/${overwrite_id}`, options);
+    return this.makeRequest('PUT', `/channels/${channel_id}/permissions/${overwrite_id}`, options);
   }
 
   async editChannelWebhook(channel_id, webhook_id, options = {}) {
-    return this.makeRequest('PATCH', `/channels/${channel_id}/webhooks/${webhook_id}`, options);
+    return this.makeRequest('PATCH', `/webhooks/${webhook_id}`, options);
   }
 
   async editChannelPosition(channel_id, position) {
@@ -354,8 +355,8 @@ class DiscordClient extends level1 {
     return this.makeRequest('DELETE', `/channels/${thread_id}/thread-members/@me`);
   }
 
-  async getThreads(channel_id) {
-    return this.makeRequest('GET', `/channels/${channel_id}/threads/active`);
+  async getThreads(guild_id) {
+    return this.makeRequest('GET', `/guilds/${guild_id}/threads/active`);
   }
 
   async getThreadMembers(thread_id) {

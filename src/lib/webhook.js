@@ -237,7 +237,7 @@ class DiscordWebhookTools {
       for (let i = 0; i < Math.min(files.length, 10); i++) {
         if (typeof files[i] === 'string' && fs.existsSync(files[i]) && fs.statSync(files[i]).isFile()) {
           const stream = fs.createReadStream(files[i]);
-          req.write(this.#buildFormDataHeader(`file${i + 1}`, basename(files[i])));
+          req.write(this.#buildFormDataHeader(`files[${i}]`, basename(files[i])));
 
           await new Promise((resolve, reject) => {
             stream.on('end', () => {
@@ -248,7 +248,7 @@ class DiscordWebhookTools {
             stream.pipe(req, { end: false });
           });
         } else if (files[i]?.filename && files[i]?.data) {
-          req.write(this.#buildFormDataHeader(`file${i + 1}`, files[i].filename));
+          req.write(this.#buildFormDataHeader(`files[${i}]`, files[i].filename));
           req.write(files[i].data);
         }
       }
@@ -295,34 +295,29 @@ class DiscordWebhookTools {
   }
 
   /**
-   * Generates a signature for verifying interactions.
-   * @param {string} timestamp - The timestamp of the interaction.
-   * @param {string|Object} body - The body of the interaction.
-   * @param {string} secretKey - The secret key.
-   * @returns {string} The generated signature.
-   */
-  generateSignature(timestamp, body, secretKey) {
-    const bodyString = typeof body === 'string' ? body : JSON.stringify(body);
-    return crypto
-      .createHmac('sha256', secretKey)
-      .update(timestamp + bodyString)
-      .digest('hex');
-  }
-  /**
-   * Verifies a signature against the generated signature.
-   * @param {string} signature The signature to verify.
+   * Verifies an Ed25519 signature for Discord interactions.
+   * @param {string} signature The signature to verify (hex string).
    * @param {string} timestamp The timestamp of the interaction.
    * @param {string | object} body The body of the interaction.
-   * @param {string} secretKey The secret key.
+   * @param {string} publicKey The application's public key (hex string).
    * @returns {boolean} True if the signature is valid, false otherwise.
    */
-  verifySignature(signature, timestamp, body, secretKey) {
-    const expectedSignature = this.generateSignature(timestamp, body, secretKey);
-    const sigBuf = Buffer.from(signature);
-    const expectedBuf = Buffer.from(expectedSignature);
-    // Guard against mismatched-length buffers (fixes M8)
-    if (sigBuf.length !== expectedBuf.length) return false;
-    return crypto.timingSafeEqual(sigBuf, expectedBuf);
+  verifySignature(signature, timestamp, body, publicKey) {
+    try {
+      const message = Buffer.from(timestamp + (typeof body === 'string' ? body : JSON.stringify(body)));
+      return crypto.verify(
+        null,
+        message,
+        crypto.createPublicKey({
+          key: Buffer.from(publicKey, 'hex'),
+          format: 'raw',
+          type: 'ed25519',
+        }),
+        Buffer.from(signature, 'hex'),
+      );
+    } catch {
+      return false;
+    }
   }
 }
 

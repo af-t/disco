@@ -7,11 +7,11 @@ export default async (client, member) => {
   const user = member.user;
   const embed = {
     title: `Goodbye!`,
-    description: `**${user.username}#${user.discriminator || '0'}** has left the server. We'll miss you!`,
+    description: `**${user.username}** has left the server. We'll miss you!`,
     thumbnail: {
       url: user.avatar
         ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=1024`
-        : `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator) % 5}.png`,
+        : `https://cdn.discordapp.com/embed/avatars/${user.discriminator && user.discriminator !== '0' ? Number(user.discriminator) % 5 : Number((BigInt(user.id) >> 22n) % 6n)}.png`,
     },
     color: 0xff0000,
     timestamp: new Date().toISOString(),

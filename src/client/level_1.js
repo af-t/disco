@@ -8,7 +8,7 @@ const DEFAULT_INTENT_KEYS = [
   'GUILDS',
   'GUILD_MEMBERS',
   'GUILD_MODERATION',
-  'GUILD_EMOJIS_AND_STICKERS',
+  'GUILD_EXPRESSIONS',
   'GUILD_INTEGRATIONS',
   'GUILD_WEBHOOKS',
   'GUILD_INVITES',
@@ -54,6 +54,7 @@ class DiscordClient extends EventEmitter {
   _temps = new Map();
   _destroyed = false; // prevents reconnect after destroy()
   _ackReceived = true;
+  _isIdentifying = false;
 
   status = 'closed';
 
@@ -100,6 +101,7 @@ class DiscordClient extends EventEmitter {
     if (this._destroyed) throw new Error('Cannot reconnect a destroyed gateway — create a new instance');
     if (!this._initialised) throw new Error('Call ready() before connecting');
     if (this.status !== 'closed') return;
+    this.status = 'connecting';
 
     // tear down stale socket before reopening
     if (this._ws) {
@@ -112,7 +114,6 @@ class DiscordClient extends EventEmitter {
     this._ws = new WebSocket(this._gatewayUrl + this._gatewayParams);
     this._ws.binaryType = 'arraybuffer';
     this.emit('CONNECT');
-    this.status = 'connecting';
 
     const ws = this._ws;
     const onOpen = this._onOpen.bind(this);
@@ -195,16 +196,28 @@ class DiscordClient extends EventEmitter {
 
       const { t, s, op, d } = JSON.parse(msg);
 
+      if (s != null) this._session.seq = s;
+
       switch (op) {
         case 0: // Dispatch
           this._handleDispatch(t, d);
           break;
+        case 1: // Server-requested heartbeat
+          this._sendHeartbeat(true);
+          break;
         case 7: // Server-requested reconnect — keep session, reconnect with resume
-          this._ws.close();
+          this._ws.close(4000); // Trigger resume flow
           break;
         case 9: // Invalid session
           // d=true resumable, d=false start fresh
-          d ? this._resume() : this._reset();
+          if (d) {
+            this._resume();
+          } else {
+            this._session.id = null;
+            this._session.seq = null;
+            this._gatewayUrl = GATEWAY;
+            setTimeout(() => this._identify(), 2000);
+          }
           break;
         case 10: // Hello
           this._setupHeartbeat(d.heartbeat_interval);
@@ -216,8 +229,6 @@ class DiscordClient extends EventEmitter {
           this.emit('ACK_NOTIFY');
           break;
       }
-
-      if (s != null) this._session.seq = s;
     } catch (err) {
       this.emit('ERROR', err);
     }
@@ -227,6 +238,7 @@ class DiscordClient extends EventEmitter {
     switch (evName) {
       case 'READY':
         this.status = 'ready';
+        this._isIdentifying = false;
         this._session.id = evData.session_id;
         this._session.user = evData.user;
         this._session.application = evData.application;
@@ -236,6 +248,7 @@ class DiscordClient extends EventEmitter {
       case 'RESUMED':
         // a resume restores a live connection but never emits READY
         this.status = 'ready';
+        this._isIdentifying = false;
         this._reconnectAttempt = 0;
         break;
       case 'GUILD_CREATE':
@@ -279,6 +292,7 @@ class DiscordClient extends EventEmitter {
     this._ws?._removeListeners?.();
     this._clearHeartbeat();
     this.status = 'closed';
+    this._isIdentifying = false;
 
     if (this._destroyed) return;
 
@@ -291,10 +305,7 @@ class DiscordClient extends EventEmitter {
       return;
     }
 
-    // bad seq or expired session — reconnect, but with a fresh identify
-    if (code === 4007 || code === 4009) {
-      this._reset();
-    }
+    // 4007 and 4009 are resumable per docs, let them fall through to default reconnect
 
     if (++this._reconnectAttempt >= RECONNECT_LIMIT) {
       this._reconnectAttempt = 0;
@@ -316,10 +327,10 @@ class DiscordClient extends EventEmitter {
     this.emit('ERROR', err);
   }
 
-  _sendHeartbeat() {
+  _sendHeartbeat(ignoreZombie = false) {
     if (this._ws?.readyState !== WebSocket.OPEN) return;
 
-    if (!this._ackReceived) {
+    if (!ignoreZombie && !this._ackReceived) {
       const msg = 'Zombie connection detected (missed heartbeat ACK). Terminating...';
       if (this.config?.logger?.createLogger) {
         this.config.logger.createLogger('GATEWAY').warn(msg);
@@ -330,7 +341,7 @@ class DiscordClient extends EventEmitter {
       return;
     }
 
-    this._ackReceived = false;
+    if (!ignoreZombie) this._ackReceived = false;
     this._ws.send(
       JSON.stringify({
         op: 1,
@@ -382,6 +393,8 @@ class DiscordClient extends EventEmitter {
   }
 
   _identify() {
+    if (this._isIdentifying) return;
+    this._isIdentifying = true;
     this._ws.send(
       JSON.stringify({
         op: 2,
@@ -413,7 +426,7 @@ class DiscordClient extends EventEmitter {
     const start = Date.now();
     return new Promise((resolve) => {
       this.once('ACK_NOTIFY', () => resolve(Date.now() - start));
-      this._sendHeartbeat(); // trigger
+      this._sendHeartbeat(true); // trigger without triggering zombie detection
     });
   }
 }

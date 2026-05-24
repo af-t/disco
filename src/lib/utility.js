@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { join } from 'node:path';
 import { inspect } from 'node:util';
+import permissionFlags from './permission.js';
 
 class Logger {
   constructor(name) {
@@ -155,9 +156,21 @@ async function deploySlashCommands(client, commands) {
       const name = cmd.data.name.toLowerCase();
       if (!seen.has(name)) {
         seen.add(name);
+
+        let default_member_permissions = undefined;
+        if (cmd.permissions && cmd.permissions.length > 0) {
+          let perms = 0n;
+          for (const p of cmd.permissions) {
+            if (permissionFlags[p]) perms |= permissionFlags[p];
+          }
+          default_member_permissions = perms.toString();
+        }
+
         slashCommands.push({
           name: name,
           description: cmd.data.description,
+          type: 1, // CHAT_INPUT
+          default_member_permissions,
           options: (cmd.data.options || []).map((opt) => ({
             ...opt,
             autocomplete: opt.autocomplete || false,
@@ -204,13 +217,17 @@ function formatAgo(since) {
 }
 
 async function getPermissions(client, guild_id, member) {
-  if (!member?.roles) return 0n;
-  let perms = 0n;
-  let guildRoles;
-  for (const id of member.roles) {
-    if (!guildRoles) guildRoles = await client.getRoles(guild_id);
-    const role = guildRoles.find((r) => r.id === id);
-    if (role) perms |= BigInt(role.permissions);
+  const guildRoles = await client.getRoles(guild_id);
+  if (!guildRoles) return 0n;
+
+  const everyoneRole = guildRoles.find((r) => r.id === guild_id);
+  let perms = everyoneRole ? BigInt(everyoneRole.permissions) : 0n;
+
+  if (member?.roles) {
+    for (const id of member.roles) {
+      const role = guildRoles.find((r) => r.id === id);
+      if (role) perms |= BigInt(role.permissions);
+    }
   }
   return perms;
 }

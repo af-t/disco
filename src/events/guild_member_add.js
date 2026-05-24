@@ -11,7 +11,7 @@ export default async (client, member) => {
     thumbnail: {
       url: user.avatar
         ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=1024`
-        : `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator) % 5}.png`,
+        : `https://cdn.discordapp.com/embed/avatars/${user.discriminator && user.discriminator !== '0' ? Number(user.discriminator) % 5 : Number((BigInt(user.id) >> 22n) % 6n)}.png`,
     },
     color: 0x00ff00,
     timestamp: new Date().toISOString(),

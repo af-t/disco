@@ -135,7 +135,7 @@ class DiscordClient extends level2 {
     const { channel_id, id } = message;
     return this.sendMessage(channel_id, content, {
       message_reference: { channel_id, message_id: id },
-      ...(mention ? {} : { allowed_mentions: {} }),
+      ...(mention ? {} : { allowed_mentions: { parse: [] } }),
       ...options,
     });
   }

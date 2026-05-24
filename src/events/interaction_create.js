@@ -17,14 +17,27 @@ export default async (client, interaction) => {
   if (interaction.type === 4) {
     if (!client.commands) return;
     const { name, options } = interaction.data;
-    const focused = options.find((opt) => opt.focused);
+    const findFocused = (opts) => {
+      if (!opts) return;
+      for (const opt of opts) {
+        if (opt.focused) return opt;
+        if (opt.options) {
+          const f = findFocused(opt.options);
+          if (f) return f;
+        }
+      }
+    };
+    const focused = findFocused(options);
 
-    if (name === 'help' && focused && focused.name === 'command') {
+    const cmd = client.commands[name.toLowerCase()];
+    if (cmd && typeof cmd.autocomplete === 'function') {
+      return cmd.autocomplete(client, interaction, focused);
+    } else if (name === 'help' && focused && focused.name === 'command') {
       const query = focused.value.toLowerCase();
       const choices = Object.keys(client.commands)
         .filter((key) => {
-          const cmd = client.commands[key];
-          return cmd.data && cmd.data.name === key && cmd.data.description && key.includes(query);
+          const c = client.commands[key];
+          return c.data && c.data.name === key && c.data.description && key.includes(query);
         })
         .slice(0, 25)
         .map((key) => ({ name: key, value: key }));
@@ -35,6 +48,18 @@ export default async (client, interaction) => {
       });
     }
     return;
+  }
+
+  // MESSAGE_COMPONENT (type 3) and MODAL_SUBMIT (type 5) handling
+  if (interaction.type === 3 || interaction.type === 5) {
+    // Fallback or generic logging for components and modals
+    client.logger?.info?.(`Received unhandled interaction type ${interaction.type}`);
+    return client
+      .createInteractionResponse(interaction.id, interaction.token, {
+        type: interaction.type === 3 ? 6 : 4, // 6: DEFERRED_UPDATE_MESSAGE for components, 4: for modals
+        data: interaction.type === 5 ? { content: 'Unhandled modal.', flags: 64 } : undefined,
+      })
+      .catch(() => {});
   }
 
   // APPLICATION_COMMAND handling (type 2)
@@ -181,6 +206,15 @@ export default async (client, interaction) => {
         });
       } catch {
         // interaction may have expired
+      }
+    } else {
+      try {
+        await client.createInteractionResponse(interaction.id, interaction.token, {
+          type: 4,
+          data: { content: '❌ An unexpected error occurred while executing this command.', flags: 64 },
+        });
+      } catch {
+        // ignore
       }
     }
   }

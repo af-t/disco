@@ -203,7 +203,11 @@ class VoiceConnection {
     });
 
     // IP discovery per Discord voice protocol
-    this.udp.send(Buffer.alloc(70, 0), this._port, this._ip, (err) => {
+    const packet = Buffer.alloc(74);
+    packet.writeUInt16BE(1, 0); // Type: Request
+    packet.writeUInt16BE(70, 2); // Length
+    packet.writeUInt32BE(this.ssrc, 4); // SSRC
+    this.udp.send(packet, this._port, this._ip, (err) => {
       if (err) this.client.logger?.error?.('IP discovery send failed:', err.message);
     });
 
@@ -218,13 +222,13 @@ class VoiceConnection {
   }
 
   _onUdpMessage(msg) {
-    // Check if this is IP discovery response (null-terminated string)
-    if (!this.externalIp) {
+    // Check if this is IP discovery response (Type 2)
+    if (!this.externalIp && msg.length >= 74) {
       try {
-        const nullIdx = msg.indexOf(0);
-        if (nullIdx > 0 && nullIdx < 100) {
-          const ipStr = msg.toString('utf8', 0, nullIdx);
-          const port = msg.readUInt16LE(msg.length - 2);
+        if (msg.readUInt16BE(0) === 2) {
+          const nullIdx = msg.indexOf(0, 8);
+          const ipStr = msg.toString('utf8', 8, nullIdx > 8 ? nullIdx : 8 + 64);
+          const port = msg.readUInt16BE(msg.length - 2);
           this.externalIp = ipStr;
           this.externalPort = port;
           clearTimeout(this._ipDiscoveryTimeout);
