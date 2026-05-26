@@ -476,7 +476,7 @@ describe('deploySlashCommands hash-unchanged skip', () => {
   it('skips PUT when hash is unchanged', async () => {
     let putCalled = false;
     const { createHash } = await import('node:crypto');
-    const cmd = { name: 'ping', description: 'Ping', options: [] };
+    const cmd = { name: 'ping', description: 'Ping', type: 1, default_member_permissions: undefined, options: [] };
     const hash = createHash('sha256')
       .update(JSON.stringify([cmd]))
       .digest('hex');

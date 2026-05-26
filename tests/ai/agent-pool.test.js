@@ -7,9 +7,12 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-afterEach(() => {
+const _tmpDirs = [];
+
+afterEach(async () => {
   mock.timers.reset();
   mock.restoreAll();
+  for (const d of _tmpDirs.splice(0)) await fsp.rm(d, { recursive: true, force: true });
 });
 
 // Fake forked child: an EventEmitter with send() recording outgoing messages.
@@ -120,7 +123,9 @@ function poolCtx() {
 }
 
 async function tmpWorkspace() {
-  return fsp.mkdtemp(path.join(os.tmpdir(), 'agentpool-'));
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agentpool-'));
+  _tmpDirs.push(dir);
+  return dir;
 }
 
 // Deterministic async waits — no fixed timeouts. flush() drains the

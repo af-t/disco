@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { inspect } from 'node:util';
 import permissionFlags from './permission.js';
 
@@ -73,7 +73,7 @@ async function importCommands(path = '', sub = false) {
     }
 
     try {
-      let mod = await import(filepath);
+      let mod = await import(resolve(filepath));
       mod = mod.default || mod;
 
       if (mod?.data?.name && mod?.execute) {
@@ -129,7 +129,7 @@ async function importEvents(client, path = '') {
     if (entry.isDirectory()) continue;
     const filepath = join(path, entry.name);
     try {
-      let mod = await import(filepath);
+      let mod = await import(resolve(filepath));
       mod = mod.default || mod;
       const eventName = entry.name.split('.')[0].toUpperCase();
       client.on(eventName, (...args) => mod(client, ...args));

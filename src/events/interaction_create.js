@@ -50,17 +50,8 @@ export default async (client, interaction) => {
     return;
   }
 
-  // MESSAGE_COMPONENT (type 3) and MODAL_SUBMIT (type 5) handling
-  if (interaction.type === 3 || interaction.type === 5) {
-    // Fallback or generic logging for components and modals
-    client.logger?.info?.(`Received unhandled interaction type ${interaction.type}`);
-    return client
-      .createInteractionResponse(interaction.id, interaction.token, {
-        type: interaction.type === 3 ? 6 : 4, // 6: DEFERRED_UPDATE_MESSAGE for components, 4: for modals
-        data: interaction.type === 5 ? { content: 'Unhandled modal.', flags: 64 } : undefined,
-      })
-      .catch(() => {});
-  }
+  // silently ignore unhandled component/modal interactions
+  if (interaction.type === 3 || interaction.type === 5) return;
 
   // APPLICATION_COMMAND handling (type 2)
   if (interaction.type !== 2) return;

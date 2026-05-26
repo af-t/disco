@@ -161,12 +161,16 @@ describe('ChannelAIRuntime with the agent pool', () => {
 
   it('removes the channel workspace dir when its buffer key is deleted', async () => {
     const workspaceRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'rt-ws-'));
-    const channelDir = path.join(workspaceRoot, 'channel-c1');
-    await fsp.mkdir(channelDir, { recursive: true });
-    const client = stubClient();
-    new ChannelAIRuntime({ client, pool: stubPool(), config: {}, workspaceRoot });
-    await client.store.onDelete('channel:buffer:c1');
-    await assert.rejects(fsp.access(channelDir));
+    try {
+      const channelDir = path.join(workspaceRoot, 'channel-c1');
+      await fsp.mkdir(channelDir, { recursive: true });
+      const client = stubClient();
+      new ChannelAIRuntime({ client, pool: stubPool(), config: {}, workspaceRoot });
+      await client.store.onDelete('channel:buffer:c1');
+      await assert.rejects(fsp.access(channelDir));
+    } finally {
+      await fsp.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it('dispatches a content-part array with an image_url block for image attachments', async () => {

@@ -56,6 +56,7 @@ describe('agent-host integration', () => {
 
     const result = await done;
     child.send({ t: 'shutdown' });
+    await fs.rm(cwd, { recursive: true, force: true });
     assert.equal(result.outcome, 'finished');
     assert.ok(received.some((m) => m.t === 'tool' && m.name === 'discord_send'));
     assert.ok(received.some((m) => m.t === 'charge' && m.kind === 'run'));

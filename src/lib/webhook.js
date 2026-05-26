@@ -302,19 +302,16 @@ class DiscordWebhookTools {
    * @param {string} publicKey The application's public key (hex string).
    * @returns {boolean} True if the signature is valid, false otherwise.
    */
-  verifySignature(signature, timestamp, body, publicKey) {
+  generateSignature(timestamp, body, secret) {
+    const message = timestamp + (typeof body === 'string' ? body : JSON.stringify(body));
+    return crypto.createHmac('sha256', secret).update(message).digest('hex');
+  }
+
+  verifySignature(signature, timestamp, body, secret) {
     try {
-      const message = Buffer.from(timestamp + (typeof body === 'string' ? body : JSON.stringify(body)));
-      return crypto.verify(
-        null,
-        message,
-        crypto.createPublicKey({
-          key: Buffer.from(publicKey, 'hex'),
-          format: 'raw',
-          type: 'ed25519',
-        }),
-        Buffer.from(signature, 'hex'),
-      );
+      const expected = this.generateSignature(timestamp, body, secret);
+      if (signature.length !== expected.length) return false;
+      return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'));
     } catch {
       return false;
     }
