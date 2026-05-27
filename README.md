@@ -46,7 +46,7 @@ A modular and extendable Discord bot built with Node.js, designed for server man
    | Variable              | Required | Default                          | Description |
    |-----------------------|----------|----------------------------------|-------------|
    | `DISCORD_TOKEN`       | Yes      | —                                | Your Discord bot token |
-   | `STORE_SERVER_URL`    | Yes      | `http://localhost:3000`          | URL of the internal store server |
+   | `STORE_SERVER_URL`    | No       | `http://localhost:3000`          | URL of the internal store server (bot runs in memory-only mode if unreachable) |
    | `STORE_SERVER_PORT`   | No       | `3000`                           | Port for the store server |
    | `OPENROUTER_API_KEY`  | No       | —                                | OpenRouter API key (for AI commands) |
    | `OPENROUTER_MODEL`    | No       | `google/gemini-2.0-flash-001`    | AI model to use for the agent |
@@ -60,6 +60,15 @@ A modular and extendable Discord bot built with Node.js, designed for server man
    | `AI_FETCH_HISTORY_MAX`| No       | `50`                             | Hard cap for the `discord_fetch_history` tool |
    | `SPOTIFY_CLIENT_ID`   | No       | —                                | Spotify API client ID (for music downloads) |
    | `SPOTIFY_CLIENT_SECRET` | No     | —                                | Spotify API client secret |
+   | `TAVILY_API_KEY`      | No       | —                                | Tavily API key (for web-search tool in AI agents) |
+   | `STORE_DATA_PATH`     | No       | `./storage/db`                   | Server-side disk path for the store database |
+   | `OPENROUTER_ORDER`    | No       | —                                | Comma-separated provider priority order |
+   | `OPENROUTER_ONLY`     | No       | —                                | Restrict inference to specific providers only |
+   | `OPENROUTER_MAX_TOKENS` | No     | model default                    | Max output tokens per agent turn |
+   | `OPENROUTER_MAX_TURNS`| No       | `120`                            | Per-loop turn cap for pooled agent processes |
+   | `AI_MAX_AGENTS`       | No       | `16`                             | Max concurrent forked agent child processes |
+   | `AI_AGENT_IDLE_MS`    | No       | `300000`                         | Evict an idle agent child after this many ms |
+   | `AI_AGENT_RESPAWN_COOLDOWN_MS` | No | `30000`                       | Cooldown per agent key after a startup crash before respawn |
    | `DISCORD_GATEWAY_URL` | No       | `wss://gateway.discord.gg`       | Discord WebSocket gateway URL (advanced) |
    | `DISCORD_API_BASE`    | No       | `https://discord.com/api/v10`    | Discord REST API base URL (advanced) |
    | `DISCORD_INTENTS`     | No       | 13 essential intents combined    | Comma-separated intent names (e.g., `GUILDS,GUILD_MEMBERS,GUILD_MESSAGES`). See [lib/intents.js](src/lib/intents.js) for all options |
@@ -69,8 +78,26 @@ A modular and extendable Discord bot built with Node.js, designed for server man
 
 4. **Start the bot**:
 
+   The bot and its persistent store run as two separate processes. Start them in order:
+
    ```bash
+   # Terminal 1 — store server (disk persistence)
+   npm run serve
+
+   # Terminal 2 — bot
    npm start
+   ```
+
+   The bot will start without the store server (memory-only mode), but persisted state (mod cases, log channel config, etc.) will be lost on restart.
+
+   **Production (PM2):** `ecosystem.config.cjs` manages both processes together:
+
+   ```bash
+   npm run pm2:start    # start both disco-store and disco-bot
+   npm run pm2:logs     # tail combined logs
+   npm run pm2:status   # inspect process state
+   npm run pm2:restart  # rolling restart
+   npm run pm2:stop     # stop both
    ```
 
 ## 🤖 Natural AI Mode
