@@ -59,4 +59,63 @@ describe('tools registry', () => {
   it('keeps ACTION_TOOL_NAMES', () => {
     assert.ok(ACTION_TOOL_NAMES.has('discord_send'));
   });
+
+  it('discord_read executor fetches the message, saves attachments, and sets saved_path', async () => {
+    const rawMsg = {
+      id: 'm1',
+      channel_id: 'c1',
+      content: 'read-me',
+      timestamp: '2026-05-26T18:00:00Z',
+      attachments: [{ filename: 'test.png', content_type: 'image/png', url: 'http://cdn/test.png', size: 100 }],
+    };
+    const ctx = {
+      client: { getMessage: async (_channel_id, _message_id) => rawMsg },
+      runtime: {
+        saveAllAttachments: async (attachments, msgId, channelId) => {
+          assert.deepEqual(attachments, rawMsg.attachments);
+          assert.equal(msgId, 'm1');
+          assert.equal(channelId, 'c1');
+          return [{ original: 'test.png', saved_path: '/path/to/test.png' }];
+        },
+      },
+    };
+    const out = JSON.parse(await getExecutor('discord_read')(ctx, { channel_id: 'c1', message_id: 'm1' }));
+    assert.ok(out.ok);
+    assert.equal(out.message.id, 'm1');
+    assert.equal(out.message.attachments[0].url, 'http://cdn/test.png');
+    assert.equal(out.message.attachments[0].saved_path, '/path/to/test.png');
+  });
+
+  it('discord_fetch_history executor fetches messages, saves attachments, and sets saved_path', async () => {
+    const rawMsg = {
+      id: 'm2',
+      channel_id: 'c1',
+      content: 'history-msg',
+      timestamp: '2026-05-26T18:00:00Z',
+      attachments: [{ filename: 'h.png', content_type: 'image/png', url: 'http://cdn/h.png', size: 100 }],
+    };
+    const ctx = {
+      client: {
+        makeRequest: async (method, path) => {
+          assert.equal(method, 'GET');
+          assert.match(path, /messages/);
+          return [rawMsg];
+        },
+      },
+      runtime: {
+        config: { fetchHistoryMax: 50 },
+        saveAllAttachments: async (attachments, msgId, channelId) => {
+          assert.deepEqual(attachments, rawMsg.attachments);
+          assert.equal(msgId, 'm2');
+          assert.equal(channelId, 'c1');
+          return [{ original: 'h.png', saved_path: '/path/to/h.png' }];
+        },
+      },
+    };
+    const out = JSON.parse(await getExecutor('discord_fetch_history')(ctx, { channel_id: 'c1', limit: 5 }));
+    assert.ok(out.ok);
+    assert.equal(out.messages.length, 1);
+    assert.equal(out.messages[0].attachments[0].url, 'http://cdn/h.png');
+    assert.equal(out.messages[0].attachments[0].saved_path, '/path/to/h.png');
+  });
 });

@@ -18,7 +18,6 @@ function namedPermissions(permsStr) {
 export const definition = {
   name: 'discord_get_role',
   description: 'Fetch a specific role in a guild (name, color, permissions, mentionable).',
-  parallelSafe: true,
   input_schema: {
     type: 'object',
     properties: {

@@ -120,8 +120,9 @@ export class ChildHandle {
     if (!wasRunning) {
       this.running = true;
       this.currentRun = deferred();
+      return this.currentRun.promise;
     }
-    return this.currentRun ? this.currentRun.promise : Promise.resolve(null);
+    return null;
   }
 
   isIdle() {
@@ -168,8 +169,7 @@ export class AgentPool {
     this.children = new Map();
     this.cooldowns = new Map();
     this._spawning = new Map();
-    this._timer = setInterval(() => this._maintain(), maintainMs);
-    this._timer.unref?.();
+    this._timer = setInterval(() => this._maintain(), maintainMs).unref();
   }
 
   has(agentKey) {

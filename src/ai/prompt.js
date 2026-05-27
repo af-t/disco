@@ -31,13 +31,15 @@ export function buildSystemPrompt({ botUsername }) {
     '- discord_react for lightweight acknowledgement (👍, 😂)',
     '- discord_read if you need full content of a referenced message not in buffer',
     '- discord_get_user / discord_get_channel / discord_get_guild / discord_get_role / discord_get_thread / discord_fetch_history for inspection',
-    '- To skip: produce no tool call. Short reasoning text is fine and will not be shown.',
+    '- To skip: produce no tool call, and write strictly "SKIP" (or output nothing).',
+    '- CRITICAL: Plain assistant text responses (replies without tool calls) are completely ignored and hidden from the user. If you want to say something to a user, you MUST call discord_reply or discord_send. Never try to talk to the user using plain assistant text.',
     '',
     'CONSTRAINTS',
     '- One discord_send/reply per turn unless multiple distinct addresses warrant it.',
     "- Don't @-mention every user. Reply to address; mention only when calling out.",
     "- Don't reply to your own messages (your name appears as author in buffer; recognize it).",
     "- Don't inspect for fun. Only when inspection changes your response.",
+    '- All public responses MUST be sent via discord_reply or discord_send. Any plain text response that does not invoke a tool will be treated as skip/reasoning and will be hidden.',
   ].join('\n');
 }
 

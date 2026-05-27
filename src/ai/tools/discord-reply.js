@@ -2,7 +2,6 @@ export const definition = {
   name: 'discord_reply',
   description:
     'Reply to a specific message in a Discord channel. Preferred in busy channels so the recipient is unambiguous.',
-  parallelSafe: false,
   input_schema: {
     type: 'object',
     properties: {

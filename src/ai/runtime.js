@@ -11,6 +11,11 @@ function sanitizeFilename(name) {
   return cleaned || 'file';
 }
 
+function isSkipToken(text) {
+  const upper = text.toUpperCase();
+  return upper === 'SKIP' || upper.startsWith('[SKIP]');
+}
+
 const DEFAULT_CONFIG = {
   debounceMs: 4000,
   forceDebounceMs: 500,
@@ -127,13 +132,44 @@ export class ChannelAIRuntime {
     }
     for (const att of candidates) {
       const safe = sanitizeFilename(att.filename);
-      const full = path.join(workspaceDir, `${msgId}-${safe}`);
+      const fileKey = att.id ? `${att.id}-${safe}` : `${msgId}-${safe}`;
+      const full = path.join(workspaceDir, fileKey);
       try {
         const res = await this.fetcher(att.url);
         if (!res?.ok) throw new Error(`fetch ${att.url} -> status ${res?.status ?? 'unknown'}`);
         const buf = Buffer.from(await res.arrayBuffer());
         await fs.writeFile(full, buf);
-        saved.push({ original: att.filename, saved_path: full, content_type: att.content_type });
+        saved.push({ id: att.id, original: att.filename, saved_path: full, content_type: att.content_type });
+      } catch (err) {
+        this.client.logger?.warn?.('attachment save failed', err);
+      }
+    }
+    return saved;
+  }
+
+  async saveAllAttachments(rawAttachments, msgId, channelId) {
+    const saved = [];
+    const candidates = (rawAttachments ?? []).filter((a) => a?.url && a.content_type);
+    if (candidates.length === 0) return saved;
+
+    const workspaceDir = path.join(this.workspaceRoot, `channel-${channelId}`);
+    try {
+      await fs.mkdir(workspaceDir, { recursive: true });
+    } catch (err) {
+      this.client.logger?.warn?.('workspace mkdir failed', err);
+      return saved;
+    }
+
+    for (const att of candidates) {
+      const safe = sanitizeFilename(att.filename);
+      const fileKey = att.id ? `${att.id}-${safe}` : `${msgId}-${safe}`;
+      const full = path.join(workspaceDir, fileKey);
+      try {
+        const res = await this.fetcher(att.url);
+        if (!res?.ok) throw new Error(`fetch ${att.url} -> status ${res?.status ?? 'unknown'}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        await fs.writeFile(full, buf);
+        saved.push({ id: att.id, original: att.filename, saved_path: full, content_type: att.content_type });
       } catch (err) {
         this.client.logger?.warn?.('attachment save failed', err);
       }
@@ -172,10 +208,33 @@ export class ChannelAIRuntime {
     const s = this._state(msg.channel_id);
     const snap = snapshotFromMessage(msg, { flag: 'new' });
 
+    // If this message is a reply to another message, check if the replied-to message has image attachments
+    // and dynamically include them so the multimodal LLM can "see" the context image.
+    if (msg.message_reference?.message_id) {
+      try {
+        const replyChannelId = msg.message_reference.channel_id ?? msg.channel_id;
+        const repliedMsg = await this.client.getMessage(replyChannelId, msg.message_reference.message_id);
+        if (repliedMsg && Array.isArray(repliedMsg.attachments)) {
+          for (const att of repliedMsg.attachments) {
+            if (att.content_type?.startsWith('image/')) {
+              snap.attachments_meta.push({
+                filename: att.filename,
+                content_type: att.content_type,
+                url: att.url,
+                size: att.size,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        this.client.logger?.warn?.('failed to fetch replied-to message for attachments', err);
+      }
+    }
+
     const workspaceDir = path.join(this.workspaceRoot, `channel-${msg.channel_id}`);
     const saved = await this._saveNonImageAttachments(msg.attachments, msg.id, workspaceDir);
     for (const entry of saved) {
-      const meta = snap.attachments_meta.find((m) => m.filename === entry.original);
+      const meta = snap.attachments_meta.find((m) => (entry.id ? m.id === entry.id : m.filename === entry.original));
       if (meta) meta.saved_path = entry.saved_path;
     }
 
@@ -202,7 +261,7 @@ export class ChannelAIRuntime {
       const channelName = s.channelName ?? msg.channel_id;
       const block = renderEventBlock(snap, { channel_name: channelName, channel_id: msg.channel_id });
       for (const observed of s.rollingBuffer) observed.flag = 'observed';
-      s.pendingMsgs = [];
+      s.pendingMsgs = s.pendingMsgs.filter((m) => m !== snap);
       this._dispatch(channelKey, msg.channel_id, msg.guild_id ?? null, block).catch((err) =>
         this.client.logger?.error?.('AI steer dispatch error', err),
       );
@@ -229,31 +288,50 @@ export class ChannelAIRuntime {
     s.debounceTimer = setTimeout(
       () => this._flush(channelId).catch((err) => this.client.logger?.error?.('AI flush error', err)),
       delay,
-    );
+    ).unref();
   }
 
   async _flush(channelId) {
     const s = this._state(channelId);
-    const sample = s.pendingMsgs[0];
-    if (!sample) return;
-
-    const guildId = sample.guild_id ?? (await this._guildOf(channelId));
-    if (guildId && (await this.budget.exhausted(guildId))) {
-      s.pendingMsgs = [];
+    if (s.flushing) {
+      this._scheduleFlush(channelId, this.config.debounceMs);
       return;
     }
 
-    const promptBlock = await this._composeUserPrompt(channelId, s);
-    const imageBlocks = collectImageBlocks(s.pendingMsgs);
-    const content = imageBlocks.length ? [{ type: 'text', text: promptBlock }, ...imageBlocks] : promptBlock;
+    const activeMsgs = [...s.pendingMsgs];
+    if (activeMsgs.length === 0) return;
 
-    for (const snap of s.rollingBuffer) snap.flag = 'observed';
-    s.pendingMsgs = [];
-
+    s.flushing = true;
     try {
-      await this._dispatch(`channel:${channelId}`, channelId, guildId, content);
+      const sample = activeMsgs[0];
+      const guildId = sample.guild_id ?? (await this._guildOf(channelId));
+      if (guildId && (await this.budget.exhausted(guildId))) {
+        s.pendingMsgs = s.pendingMsgs.filter((m) => !activeMsgs.includes(m));
+        return;
+      }
+
+      const channelKey = `channel:${channelId}`;
+      const agentExists = this.pool.has(channelKey);
+      const snapshotsToRender = agentExists ? activeMsgs : s.rollingBuffer;
+
+      const newCount = activeMsgs.length;
+      const promptBlock = await this._composeUserPrompt(channelId, s, snapshotsToRender, newCount);
+      const imageBlocks = collectImageBlocks(activeMsgs);
+      const content = imageBlocks.length ? [{ type: 'text', text: promptBlock }, ...imageBlocks] : promptBlock;
+
+      for (const snap of s.rollingBuffer) {
+        if (activeMsgs.includes(snap)) snap.flag = 'observed';
+      }
+      s.pendingMsgs = s.pendingMsgs.filter((m) => !activeMsgs.includes(m));
+
+      await this._dispatch(channelKey, channelId, guildId, content);
     } catch (err) {
       this.client.logger?.error?.('AI flush failure', err);
+    } finally {
+      s.flushing = false;
+      if (s.pendingMsgs.length > 0) {
+        this._scheduleFlush(channelId, this.config.debounceMs);
+      }
     }
   }
 
@@ -268,7 +346,33 @@ export class ChannelAIRuntime {
       workspaceDir: path.join(this.workspaceRoot, `channel-${channelId}`),
       history: null,
     };
-    await this.pool.run(channelKey, content, spawnContext);
+    const done = await this.pool.run(channelKey, content, spawnContext);
+
+    // Fallback: If the agent finished naturally with a plain text response (no tool calls),
+    // and it is NOT a skip command/indicator and didn't call any message tools, automatically post it.
+    if (done && typeof done.text === 'string' && done.actionToolCalled === false) {
+      const text = done.text.trim();
+      if (text && !isSkipToken(text)) {
+        const s = this._state(channelId);
+        // Find the last incoming message (or any message not authored by the bot) to reply to
+        const lastMsg = [...s.rollingBuffer].reverse().find((m) => m.author_id !== this.identity.id);
+        if (lastMsg && lastMsg.id) {
+          try {
+            const sent = await this.client.reply({ channel_id: channelId, id: lastMsg.id }, text);
+            this.onBotMessage(sent);
+          } catch (err) {
+            this.client.logger?.error?.('AI fallback reply failed', err);
+          }
+        } else {
+          try {
+            const sent = await this.client.send(channelId, text);
+            this.onBotMessage(sent);
+          } catch (err) {
+            this.client.logger?.error?.('AI fallback send failed', err);
+          }
+        }
+      }
+    }
   }
 
   async _guildOf(channelId) {
@@ -335,6 +439,16 @@ export class ChannelAIRuntime {
         await this.client
           .reply(msg, '⚠️ Run hit the turn limit — send another message to continue where it left off.')
           .catch(() => {});
+      } else if (done && typeof done.text === 'string' && done.actionToolCalled === false) {
+        const text = done.text.trim();
+        if (text && !isSkipToken(text)) {
+          try {
+            const sent = await this.client.reply(msg, text);
+            this.onBotMessage(sent);
+          } catch (err) {
+            this.client.logger?.error?.('AI command fallback reply failed', err);
+          }
+        }
       }
     } catch (err) {
       this.client.logger?.error?.('AI command invoke failure', err);
@@ -360,7 +474,7 @@ export class ChannelAIRuntime {
     } catch {}
   }
 
-  async _composeUserPrompt(channelId, state) {
+  async _composeUserPrompt(channelId, state, snapshotsToRender, newCount) {
     let channelName = state.channelName;
     let guildId = null;
     try {
@@ -369,12 +483,17 @@ export class ChannelAIRuntime {
       guildId = ch?.guild_id ?? null;
       state.channelName = channelName;
     } catch {}
-    const newCount = state.pendingMsgs.length;
-    const ctxCount = Math.max(0, state.rollingBuffer.length - newCount);
-    const header = buildTurnInjector({ channelId, channelName, guildId, newCount, contextCount: ctxCount });
-    const blocks = state.rollingBuffer.map((snap) =>
-      renderEventBlock(snap, { channel_name: channelName, channel_id: channelId }),
-    );
+    const list = snapshotsToRender ?? state.rollingBuffer;
+    const finalNewCount = newCount ?? state.pendingMsgs.length;
+    const ctxCount = Math.max(0, state.rollingBuffer.length - finalNewCount);
+    const header = buildTurnInjector({
+      channelId,
+      channelName,
+      guildId,
+      newCount: finalNewCount,
+      contextCount: ctxCount,
+    });
+    const blocks = list.map((snap) => renderEventBlock(snap, { channel_name: channelName, channel_id: channelId }));
     return `${header}\n\n${blocks.join('\n\n')}`;
   }
 }

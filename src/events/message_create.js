@@ -32,7 +32,7 @@ const parseDM = async (client, message) => {
         useAI: true,
         rawArgs: dm.contents.join('\n'),
       });
-    }, 7000),
+    }, 7000).unref(),
   );
 };
 
@@ -150,7 +150,7 @@ export default async (client, m) => {
                 .deleteMessage(m.channel_id, warn.id)
                 .catch((err) => client.logger?.warn?.('Failed to delete link warning:', err)),
             5000,
-          );
+          ).unref();
           return;
         }
       }
@@ -186,7 +186,7 @@ export default async (client, m) => {
             .deleteMessage(m.channel_id, reply.id)
             .catch((err) => client.logger?.warn?.('Failed to delete AFK welcome:', err)),
         5000,
-      );
+      ).unref();
     }
 
     // Hook B: Notify about AFK-mentioned users
@@ -208,7 +208,7 @@ export default async (client, m) => {
             .deleteMessage(m.channel_id, reply.id)
             .catch((err) => client.logger?.warn?.('Failed to delete AFK mention notice:', err)),
         10000,
-      );
+      ).unref();
     }
   }
 
@@ -251,7 +251,7 @@ export default async (client, m) => {
         m.channel_id,
         `**${m.author.global_name || m.author.username}**! Please slow down~ You're a little too fast.`,
       );
-      setTimeout(() => client.deleteMessage(m.channel_id, reply.id), 3000);
+      setTimeout(() => client.deleteMessage(m.channel_id, reply.id), 3000).unref();
       return;
     }
     await client.store.set(`request_limit:${m.author.id}`, cached, true);

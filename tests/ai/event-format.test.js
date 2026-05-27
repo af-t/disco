@@ -37,6 +37,7 @@ test('renderEventBlock produces a <discord-event> XML-ish block', () => {
   };
   const out = renderEventBlock(snap, { channel_name: 'general', channel_id: 'c1' });
   assert.match(out, /<discord-event/);
+  assert.match(out, /id="1"/);
   assert.match(out, /author="alice \(u1\)"/);
   assert.match(out, /channel="general \(c1\)"/);
   assert.match(out, /flag="NEW"/);

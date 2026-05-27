@@ -58,12 +58,12 @@ class DiscordWebhookTools {
 
     if (now < this.#resetTime) {
       const delay = this.#resetTime - now;
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay).unref());
     }
 
     if (this.#remainingRequests <= 0) {
       const delay = Math.max(0, this.#resetTime - now);
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay).unref());
     }
   }
 
@@ -141,7 +141,7 @@ class DiscordWebhookTools {
               this.sendRawRequest(data, options, retryCount + 1)
                 .then(resolve)
                 .catch(reject);
-            }, retryAfter);
+            }, retryAfter).unref();
           } else {
             reject(new Error(`HTTP ${res.statusCode}: ${responseData}`));
           }
@@ -155,7 +155,7 @@ class DiscordWebhookTools {
             this.sendRawRequest(data, options, retryCount + 1)
               .then(resolve)
               .catch(reject);
-          }, DiscordWebhookTools.RETRY_DELAY);
+          }, DiscordWebhookTools.RETRY_DELAY).unref();
         } else {
           reject(new Error('Request timeout'));
         }
@@ -167,7 +167,7 @@ class DiscordWebhookTools {
             this.sendRawRequest(data, options, retryCount + 1)
               .then(resolve)
               .catch(reject);
-          }, DiscordWebhookTools.RETRY_DELAY);
+          }, DiscordWebhookTools.RETRY_DELAY).unref();
         } else {
           reject(error);
         }

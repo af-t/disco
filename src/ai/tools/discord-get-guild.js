@@ -4,7 +4,6 @@ export const definition = {
   name: 'discord_get_guild',
   description:
     'Fetch metadata about a Discord guild (server): name, owner, member count, and a capped list of channels.',
-  parallelSafe: true,
   input_schema: {
     type: 'object',
     properties: { guild_id: { type: 'string' } },

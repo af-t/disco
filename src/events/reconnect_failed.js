@@ -1,4 +1,4 @@
 export default async (client, m) => {
   client.logger.warn(m);
-  setTimeout(() => client.connect(), 30_000);
+  setTimeout(() => client.connect(), 30_000).unref();
 };

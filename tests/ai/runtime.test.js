@@ -42,6 +42,7 @@ function stubClient() {
       },
     },
     getChannel: async (id) => ({ id, name: `chan-${id}`, guild_id: 'g1' }),
+    getMessage: async (cid, mid) => ({ id: mid, channel_id: cid, attachments: [] }),
     reply: async () => ({ id: 'r' }),
     logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
   };
@@ -194,5 +195,166 @@ describe('ChannelAIRuntime with the agent pool', () => {
     assert.equal(pool.runs.length, 1);
     assert.ok(Array.isArray(pool.runs[0].content));
     assert.ok(pool.runs[0].content.some((b) => b.type === 'image_url' && b.image_url.url === 'http://cdn/pic.png'));
+  });
+
+  it('natural mode fallback reply triggers on done.text with actionToolCalled:false', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const client = stubClient();
+    const sentReplies = [];
+    client.reply = async (m, text) => {
+      sentReplies.push({ m, text });
+      return { id: 'sent-reply-id' };
+    };
+
+    pool.run = async (_agentKey, _content, _spawnContext) => {
+      return { outcome: 'finished', text: 'this is a fallback response', actionToolCalled: false, usage: {} };
+    };
+
+    const rt = new ChannelAIRuntime({
+      client,
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+
+    await rt.onMessage(msg({ id: 'm1', content: 'test question' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+
+    assert.equal(sentReplies.length, 1);
+    assert.equal(sentReplies[0].text, 'this is a fallback response');
+    assert.equal(sentReplies[0].m.id, 'm1');
+  });
+
+  it('natural mode fallback reply ignores SKIP and actionToolCalled:true', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const client = stubClient();
+    const sentReplies = [];
+    client.reply = async (m, text) => {
+      sentReplies.push({ m, text });
+      return { id: 'sent-reply-id' };
+    };
+
+    const rt = new ChannelAIRuntime({
+      client,
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+
+    // Case 1: text is SKIP
+    pool.run = async () => ({ outcome: 'finished', text: 'SKIP', actionToolCalled: false, usage: {} });
+    await rt.onMessage(msg({ id: 'm1', content: 'test question' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(sentReplies.length, 0);
+
+    // Case 2: actionToolCalled:true
+    pool.run = async () => ({ outcome: 'finished', text: 'hello', actionToolCalled: true, usage: {} });
+    await rt.onMessage(msg({ id: 'm2', content: 'test question 2' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(sentReplies.length, 0);
+  });
+
+  it('command mode fallback reply triggers on done.text with actionToolCalled:false', async () => {
+    const client = stubClient();
+    const pool = stubPool();
+    const sentReplies = [];
+    client.reply = async (m, text) => {
+      sentReplies.push({ m, text });
+      return { id: 'sent-reply-id' };
+    };
+
+    pool.run = async () => ({
+      outcome: 'finished',
+      text: 'command fallback response',
+      actionToolCalled: false,
+      usage: {},
+    });
+
+    const rt = new ChannelAIRuntime({ client, pool, config: { dailyLimit: 1000 } });
+    await rt.invoke({ mode: 'command', msg: msg(), explicitPrompt: 'do a thing' });
+
+    assert.equal(sentReplies.length, 1);
+    assert.equal(sentReplies[0].text, 'command fallback response');
+  });
+
+  it('natural mode only includes new pending messages when agent is already alive in the pool', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const aliveAgents = new Set();
+    pool.has = (k) => aliveAgents.has(k);
+    pool.isRunning = (_k) => false;
+
+    const client = stubClient();
+    const rt = new ChannelAIRuntime({
+      client,
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+
+    // Case 1: Agent is NOT alive in the pool yet.
+    // It should render the full rollingBuffer.
+    await rt.onMessage(msg({ id: 'm1', content: 'first message' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(pool.runs.length, 1);
+    assert.match(pool.runs[0].content, /first message/);
+
+    // Case 2: Agent IS alive in the pool.
+    // It should only render the pending message, not the old one in rollingBuffer.
+    aliveAgents.add('channel:c1');
+    pool.runs.length = 0;
+
+    await rt.onMessage(msg({ id: 'm2', content: 'second message' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+
+    assert.equal(pool.runs.length, 1);
+    assert.match(pool.runs[0].content, /second message/);
+    assert.doesNotMatch(pool.runs[0].content, /first message/);
+  });
+
+  it('automatically fetches replied-to message attachments and sends them inline', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const client = stubClient();
+
+    // Stub getMessage to return a replied-to message with an image attachment
+    client.getMessage = async (cid, mid) => {
+      assert.equal(cid, 'c1');
+      assert.equal(mid, 'replied-id');
+      return {
+        id: mid,
+        channel_id: cid,
+        attachments: [
+          { filename: 'replied-image.png', content_type: 'image/png', url: 'http://cdn/replied-image.png', size: 500 },
+        ],
+      };
+    };
+
+    const rt = new ChannelAIRuntime({
+      client,
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+
+    await rt.onMessage(
+      msg({
+        id: 'm2',
+        content: 'what image is this?',
+        message_reference: { message_id: 'replied-id', channel_id: 'c1' },
+      }),
+    );
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+
+    assert.equal(pool.runs.length, 1);
+    assert.ok(Array.isArray(pool.runs[0].content));
+    // Verify that the replied message's image is included in the multimodal blocks
+    assert.ok(
+      pool.runs[0].content.some((b) => b.type === 'image_url' && b.image_url.url === 'http://cdn/replied-image.png'),
+    );
   });
 });

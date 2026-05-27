@@ -8,6 +8,7 @@ export function snapshotFromMessage(msg, { flag = 'observed' } = {}) {
     content: msg.content ?? '',
     reply_to: msg.message_reference?.message_id ?? null,
     attachments_meta: (msg.attachments ?? []).map((a) => ({
+      id: a.id,
       filename: a.filename,
       content_type: a.content_type ?? 'application/octet-stream',
       url: a.url,
@@ -43,6 +44,7 @@ export function renderEventBlock(snap, { channel_name = 'unknown', channel_id = 
         .join('; ')
     : '';
   const attrs = [
+    `id="${snap.id ?? 'unknown'}"`,
     `author="${escapeAttr(`${snap.author_name} (${snap.author_id})`)}"`,
     `channel="${escapeAttr(`${channel_name} (${channel_id})`)}"`,
     `timestamp="${ts}"`,

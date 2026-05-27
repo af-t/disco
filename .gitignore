@@ -9,3 +9,4 @@ workspaces/
 .worktrees/
 .openrouter/
 .todos.json
+*.bak

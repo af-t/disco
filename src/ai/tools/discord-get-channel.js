@@ -15,7 +15,6 @@ function sanitize(ch) {
 export const definition = {
   name: 'discord_get_channel',
   description: 'Fetch metadata about a Discord channel: name, topic, type, parent category, nsfw flag.',
-  parallelSafe: true,
   input_schema: {
     type: 'object',
     properties: { channel_id: { type: 'string' } },

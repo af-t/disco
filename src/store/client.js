@@ -457,7 +457,7 @@ class StoreClient extends StoreBase {
     this._retryTimer = setTimeout(() => {
       this._retryTimer = null;
       this.connect().then(resolve);
-    }, delay);
+    }, delay).unref();
   }
 
   async connect() {
@@ -572,7 +572,7 @@ class StoreClient extends StoreBase {
         if (this._pendingRequests.has(id)) {
           settle(reject, new Error('Request timed out'));
         }
-      }, 30000);
+      }, 30000).unref();
 
       const payload = JSON.stringify({ op, id, args });
       try {

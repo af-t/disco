@@ -2,7 +2,6 @@ export const definition = {
   name: 'discord_send',
   description:
     'Send a new message to a Discord channel you have access to. Use for fresh statements not tied to a specific reply target.',
-  parallelSafe: false,
   input_schema: {
     type: 'object',
     properties: {

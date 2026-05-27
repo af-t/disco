@@ -113,6 +113,8 @@ describe('agent host core', () => {
       summarizer: async () => 's',
     });
     const promise = host.rpc('discord_send', { channel_id: 'c1', content: 'x' });
+    // action tools are serialised through a promise queue — drain one microtask first
+    await Promise.resolve();
     const toolMsg = sent.find((m) => m.t === 'tool');
     assert.equal(toolMsg.name, 'discord_send');
     host.handle({ t: 'tool-result', id: toolMsg.id, ok: true, result: 'sent-ok' });
@@ -140,5 +142,57 @@ describe('agent host core', () => {
     await host.handle({ t: 'shutdown' });
     assert.equal(cleaned, true);
     assert.equal(closed, true);
+  });
+
+  it('includes text and actionToolCalled in done payload', async () => {
+    const sent = [];
+    const agent = stubAgent({
+      runImpl: (a) => a.messages.push({ role: 'assistant', content: 'hello from assistant' }),
+    });
+    const host = createHost({
+      agent,
+      send: (m) => sent.push(m),
+      mode: 'natural',
+      compactThreshold: 1000,
+      keepTail: 10,
+      summarizer: async () => 's',
+    });
+    host.handle({ t: 'prompt', id: 'r1', content: 'hello' });
+    await new Promise((r) => setTimeout(r, 10));
+    const done = sent.find((m) => m.t === 'done');
+    assert.equal(done.outcome, 'finished');
+    assert.equal(done.text, 'hello from assistant');
+    assert.equal(done.actionToolCalled, false);
+  });
+
+  it('sets actionToolCalled to true when discord tool is called', async () => {
+    const sent = [];
+    const agent = stubAgent({
+      runImpl: async (a) => {
+        await host.rpc('discord_send', { channel_id: 'c1', content: 'msg' });
+        a.messages.push({ role: 'assistant', content: 'closing thought' });
+      },
+    });
+    const host = createHost({
+      agent,
+      send: (m) => {
+        sent.push(m);
+        if (m.t === 'tool' && m.name === 'discord_send') {
+          setTimeout(() => {
+            host.handle({ t: 'tool-result', id: m.id, ok: true, result: 'ok' });
+          }, 1);
+        }
+      },
+      mode: 'natural',
+      compactThreshold: 1000,
+      keepTail: 10,
+      summarizer: async () => 's',
+    });
+
+    host.handle({ t: 'prompt', id: 'r1', content: 'hello' });
+    await new Promise((r) => setTimeout(r, 20));
+    const done = sent.find((m) => m.t === 'done');
+    assert.equal(done.outcome, 'finished');
+    assert.equal(done.actionToolCalled, true);
   });
 });

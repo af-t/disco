@@ -218,7 +218,7 @@ class VoiceConnection {
         // Fallback: use internal IP from ready
         this._selectProtocol(this._ip, this._port);
       }
-    }, 5000);
+    }, 5000).unref();
   }
 
   _onUdpMessage(msg) {
@@ -354,10 +354,10 @@ class VoiceConnection {
       () => {
         this.heartbeatJitter = null;
         this._sendVoiceHeartbeat();
-        this.heartbeat = setInterval(() => this._sendVoiceHeartbeat(), interval);
+        this.heartbeat = setInterval(() => this._sendVoiceHeartbeat(), interval).unref();
       },
       Math.floor(Math.random() * interval),
-    );
+    ).unref();
   }
 
   _sendVoiceHeartbeat() {
@@ -452,7 +452,7 @@ class DiscordClient extends level3 {
           this.#pendingVoiceJoin.delete(guildId);
           pending.reject(new Error(`Voice join timed out for guild ${guildId}`));
         }
-      }, 15000);
+      }, 15000).unref();
     });
   }
 
@@ -520,7 +520,7 @@ class DiscordClient extends level3 {
 
     // Need a short delay for VOICE_STATE_UPDATE to arrive first
     if (!this._voiceSessionId) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 500).unref());
     }
 
     const conn = new VoiceConnection(this, guild_id, pending.channelId, this.options);
@@ -559,7 +559,7 @@ class DiscordClient extends level3 {
           this.off('VOICE_CONNECT', onConnect);
           this.off('VOICE_DISCONNECT', onFail);
           reject(new Error('Voice connection timed out'));
-        }, 10000);
+        }, 10000).unref();
       });
 
       this.#pendingVoiceJoin.delete(guild_id);

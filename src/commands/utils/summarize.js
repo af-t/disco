@@ -16,7 +16,7 @@ const execute = async (client, message, _, args) => {
       await client
         .sendTyping(message.channel_id)
         .catch((err) => client.logger?.warn?.('Typing indicator failed:', err));
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 5000).unref());
     }
   };
 

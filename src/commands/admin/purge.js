@@ -73,7 +73,7 @@ const execute = async (client, message, args) => {
             .deleteMessage(message.channel_id, reply.id)
             .catch((err) => client.logger?.warn?.('Failed to auto-delete purge feedback:', err)),
         3_500,
-      );
+      ).unref();
   }
 };
 

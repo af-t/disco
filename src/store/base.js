@@ -259,7 +259,9 @@ class StoreBase {
 
   async _startMaintainer() {
     while (this._active) {
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 15_000).unref();
+      });
       if (!this._active) break;
 
       let cycle = 0;

@@ -216,7 +216,7 @@ class DiscordClient extends EventEmitter {
             this._session.id = null;
             this._session.seq = null;
             this._gatewayUrl = GATEWAY;
-            setTimeout(() => this._identify(), 2000);
+            setTimeout(() => this._identify(), 2000).unref();
           }
           break;
         case 10: // Hello
@@ -318,7 +318,7 @@ class DiscordClient extends EventEmitter {
       this._reconnectTimer = setTimeout(() => {
         this._reconnectTimer = null;
         if (!this._destroyed) this.connect();
-      }, delay);
+      }, delay).unref();
     }
   }
 
@@ -359,10 +359,10 @@ class DiscordClient extends EventEmitter {
       () => {
         this._heartbeatJitter = null;
         this._sendHeartbeat();
-        this._heartbeat = setInterval(this._sendHeartbeat.bind(this), interval);
+        this._heartbeat = setInterval(this._sendHeartbeat.bind(this), interval).unref();
       },
       Math.floor(Math.random() * interval),
-    );
+    ).unref();
   }
 
   _clearHeartbeat() {

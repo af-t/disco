@@ -1,5 +1,6 @@
 import { MSG } from './ipc.js';
 import { shouldCompact, compact } from './compactor.js';
+import { ACTION_TOOL_NAMES } from './tools/index.js';
 
 // A run finished naturally only if the last message is assistant text
 // with no pending tool calls. Anything else means the loop was cut short.
@@ -11,6 +12,17 @@ function finishedNaturally(messages) {
     return last.content.some((p) => p?.type === 'text' && typeof p.text === 'string' && p.text.trim());
   }
   return false;
+}
+
+function getLastTextContent(messages) {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'assistant' || last.tool_calls?.length) return null;
+  if (typeof last.content === 'string') return last.content;
+  if (Array.isArray(last.content)) {
+    const textPart = last.content.find((p) => p?.type === 'text' && typeof p.text === 'string');
+    return textPart ? textPart.text : null;
+  }
+  return null;
 }
 
 export function createHost({
@@ -26,9 +38,26 @@ export function createHost({
   const pendingTools = new Map();
   let toolSeq = 0;
   let activeLoop = null;
+  let actionToolCalled = false;
+  // SDK v1.3.0 removed groupToolCalls; all tool calls now run in parallel.
+  // Chain action-tool RPCs through a promise queue to preserve send order.
+  let actionQueue = Promise.resolve();
 
   // Used by proxy tools: RPC a Discord tool call to the parent.
   function rpc(name, input) {
+    if (ACTION_TOOL_NAMES.has(name)) {
+      actionToolCalled = true;
+      const p = actionQueue.then(
+        () =>
+          new Promise((resolve, reject) => {
+            const id = `t${++toolSeq}`;
+            pendingTools.set(id, { resolve, reject });
+            send({ t: MSG.TOOL, id, name, input });
+          }),
+      );
+      actionQueue = p.catch(() => {});
+      return p;
+    }
     return new Promise((resolve, reject) => {
       const id = `t${++toolSeq}`;
       pendingTools.set(id, { resolve, reject });
@@ -60,11 +89,19 @@ export function createHost({
     const outcome = !aborted && finishedNaturally(agent.messages) ? 'finished' : 'truncated';
     const done = { t: MSG.DONE, id: runId, outcome, usage: agent.usage };
     if (mode === 'command') done.messages = agent.messages;
+    if (outcome === 'finished') {
+      done.text = getLastTextContent(agent.messages);
+      done.actionToolCalled = actionToolCalled;
+    }
     send(done);
   }
 
   function onPrompt({ id, content }) {
     const wasIdle = !agent.isRunning;
+    if (wasIdle) {
+      actionToolCalled = false;
+      actionQueue = Promise.resolve();
+    }
     let p;
     try {
       p = agent.run(content, null, { signal: abort.signal });

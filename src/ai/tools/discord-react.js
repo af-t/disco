@@ -2,7 +2,6 @@ export const definition = {
   name: 'discord_react',
   description:
     'Add a single emoji reaction to a Discord message. Use for lightweight acknowledgement when text would be overkill.',
-  parallelSafe: true,
   input_schema: {
     type: 'object',
     properties: {

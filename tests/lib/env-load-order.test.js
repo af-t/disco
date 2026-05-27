@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -40,6 +40,7 @@ describe('env load order', () => {
     it('applies custom .env values to module-scope constants via subprocess simulation', () => {
       const envPath = join(projectRoot, 'tmp', '.test-env-order');
       const scriptPath = join(projectRoot, 'tmp', '.test-env-order.mjs');
+      mkdirSync(join(projectRoot, 'tmp'), { recursive: true });
       writeFileSync(
         envPath,
         'DISCORD_RECONNECT_DELAY=86753\nDISCORD_RECONNECT_LIMIT=2\nDISCORD_GATEWAY_URL=wss://custom.example/\nDISCORD_MAX_RETRIES=4\n',

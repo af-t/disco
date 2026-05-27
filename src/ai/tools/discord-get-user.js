@@ -11,7 +11,6 @@ function sanitizeMember(m) {
 export const definition = {
   name: 'discord_get_user',
   description: 'Fetch a Discord user profile. Optionally include their roles in a specific guild.',
-  parallelSafe: true,
   input_schema: {
     type: 'object',
     properties: {
