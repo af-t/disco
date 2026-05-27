@@ -28,8 +28,8 @@ async function onInit(cfg) {
     maxTurns: cfg.maxTurns,
     systemPrompt: cfg.systemPrompt,
     storagePaths: {
-      tmpDir: path.join(cwd, '.agent-tmp'),
-      memoryDir: path.join(cwd, '.agent-memory'),
+      tmpDir: path.join(cwd, '.agent', 'tmp'),
+      memoryDir: path.join(cwd, '.agent', 'memory'),
     },
   });
   if (Array.isArray(cfg.history)) agent.messages = cfg.history;
