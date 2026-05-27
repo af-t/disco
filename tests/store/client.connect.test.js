@@ -251,3 +251,197 @@ describe('StoreClient connect message event', () => {
     await connectPromise;
   });
 });
+
+// ── _ensureConnected() ────────────────────────────────────────────────────────
+describe('StoreClient _ensureConnected', () => {
+  afterEach(() => {
+    wsInstances.length = 0;
+    mock.restoreAll();
+  });
+
+  it('returns immediately when WS is already OPEN', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    const ws = new MockWS('ws://mock');
+    client._ws = ws;
+    let connectCalled = false;
+    mock.method(client, 'connect', async () => { connectCalled = true; });
+    await client._ensureConnected();
+    assert.strictEqual(connectCalled, false);
+  });
+
+  it('calls connect() when _ws is null', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    let connectCalled = false;
+    mock.method(client, 'connect', async () => { connectCalled = true; });
+    await client._ensureConnected();
+    assert.strictEqual(connectCalled, true);
+  });
+
+  it('deduplicates concurrent calls — connect() called only once', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    let callCount = 0;
+    let resolveConnect;
+    mock.method(client, 'connect', () => new Promise((r) => {
+      callCount++;
+      resolveConnect = r;
+    }));
+    const p1 = client._ensureConnected();
+    const p2 = client._ensureConnected();
+    resolveConnect();
+    await Promise.all([p1, p2]);
+    assert.strictEqual(callCount, 1);
+    assert.strictEqual(client._connectPromise, null); // cleared after resolution
+  });
+
+  it('resets _retryAttempt to 0 before calling connect()', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    client._retryAttempt = 5;
+    mock.method(client, 'connect', async () => {});
+    await client._ensureConnected();
+    assert.strictEqual(client._retryAttempt, 0);
+  });
+});
+
+// ── Idle disconnect ───────────────────────────────────────────────────────────
+describe('StoreClient idle disconnect', () => {
+  afterEach(() => {
+    wsInstances.length = 0;
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('_disconnectIdle sets _intentionalClose and closes WS', () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    const ws = new MockWS('ws://mock');
+    client._ws = ws;
+    client._disconnectIdle();
+    assert.strictEqual(client._intentionalClose, true);
+    assert.strictEqual(ws.readyState, 3); // CLOSED
+  });
+
+  it('_disconnectIdle is a no-op when _ws is null', () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    assert.doesNotThrow(() => client._disconnectIdle());
+  });
+
+  it('_resetIdleTimer schedules _disconnectIdle after IDLE_DISCONNECT_MS', () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    const ws = new MockWS('ws://mock');
+    client._ws = ws;
+    let idleFired = false;
+    mock.method(client, '_disconnectIdle', () => { idleFired = true; });
+    client._resetIdleTimer();
+    assert.strictEqual(idleFired, false);
+    mock.timers.tick(StoreClient.IDLE_DISCONNECT_MS);
+    assert.strictEqual(idleFired, true);
+  });
+
+  it('close handler with _intentionalClose=true resolves without retry and resets flag', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    const connectPromise = client.connect();
+    client._reconnect = true; // would normally trigger retry
+
+    client._intentionalClose = true;
+    wsInstances[0].dispatch('close', { code: 1000, reason: '' });
+    await connectPromise;
+
+    assert.strictEqual(client._ws, null);
+    assert.strictEqual(client._intentionalClose, false);
+    assert.strictEqual(client._retryAttempt, 0); // no retry increment
+  });
+
+  it('close handler with _intentionalClose=false and _reconnect=true schedules retry', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    const connectPromise = client.connect();
+
+    wsInstances[0].dispatch('close', { code: 1000, reason: '' });
+    assert.strictEqual(client._retryAttempt, 1);
+    assert.strictEqual(client._intentionalClose, false); // flag untouched on server-initiated close
+
+    client._reconnect = false;
+    mock.timers.tick(10_000);
+    await connectPromise;
+  });
+
+  it('close handler clears _idleTimer so stale timer cannot fire on a new connection', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    const connectPromise = client.connect();
+    // arm an idle timer
+    let idleFired = false;
+    mock.method(client, '_disconnectIdle', () => { idleFired = true; });
+    client._resetIdleTimer();
+    // simulate unexpected server close
+    client._reconnect = false;
+    wsInstances[0].dispatch('close', { code: 1006, reason: '' });
+    await connectPromise;
+    // advance past idle timeout — should NOT fire since timer was cleared on close
+    mock.timers.tick(StoreClient.IDLE_DISCONNECT_MS + 1000);
+    assert.strictEqual(idleFired, false);
+  });
+});
+
+// ── _connectForShutdown() ─────────────────────────────────────────────────────
+describe('StoreClient _connectForShutdown', () => {
+  afterEach(() => {
+    wsInstances.length = 0;
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('returns true immediately when WS is already OPEN', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    const ws = new MockWS('ws://mock'); // MockWS.OPEN = 1, readyState = 1
+    client._ws = ws;
+    const result = await client._connectForShutdown(5000);
+    assert.strictEqual(result, true);
+  });
+
+  it('returns true when connect() succeeds and WS is OPEN', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    mock.method(client, 'connect', async () => {
+      client._ws = new MockWS('ws://mock');
+    });
+    const result = await client._connectForShutdown(5000);
+    assert.strictEqual(result, true);
+  });
+
+  it('returns false when connect() times out', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    let resolveConnect;
+    mock.method(client, 'connect', () => new Promise((r) => { resolveConnect = r; }));
+    const resultPromise = client._connectForShutdown(100);
+    mock.timers.tick(101);
+    const result = await resultPromise;
+    assert.strictEqual(result, false);
+    resolveConnect?.();
+  });
+
+  it('returns false when connect() resolves but WS is not OPEN', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    mock.method(client, 'connect', async () => {
+      // connect resolves but _ws stays null (error path)
+    });
+    const result = await client._connectForShutdown(5000);
+    assert.strictEqual(result, false);
+  });
+
+  it('awaits existing _connectPromise instead of starting a duplicate connect', async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    let connectCalled = false;
+    mock.method(client, 'connect', async () => { connectCalled = true; });
+    // simulate an in-flight connect by setting _connectPromise directly
+    let resolveInFlight;
+    client._connectPromise = new Promise((r) => { resolveInFlight = r; });
+    const resultPromise = client._connectForShutdown(5000);
+    // resolve in-flight connect with a live WS
+    client._ws = new MockWS('ws://mock');
+    resolveInFlight();
+    const result = await resultPromise;
+    assert.strictEqual(result, true);
+    assert.strictEqual(connectCalled, false); // no duplicate connect started
+  });
+});

@@ -99,6 +99,48 @@ describe('StoreClient connect and send/receive', () => {
   });
 });
 
+// ── _send: connect-on-demand + idle timer reset ───────────────────────────────
+describe('StoreClient _send connect-on-demand', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('calls _ensureConnected when WS is not connected', async () => {
+    const { client, ws } = makeClient();
+    client._ws = null; // simulate disconnected
+    let ensureCalled = false;
+    mock.method(client, '_ensureConnected', async () => {
+      ensureCalled = true;
+      client._ws = ws; // restore as if connect succeeded
+    });
+    await client._send('ready');
+    assert.strictEqual(ensureCalled, true);
+  });
+
+  it('skips _ensureConnected when WS is already OPEN (fast path)', async () => {
+    const { client } = makeClient(); // WS is OPEN by default
+    let ensureCalled = false;
+    mock.method(client, '_ensureConnected', async () => { ensureCalled = true; });
+    await client._send('ready');
+    assert.strictEqual(ensureCalled, false);
+  });
+
+  it('resets idle timer after successful ws.send()', async () => {
+    const { client } = makeClient();
+    let resetCalled = false;
+    mock.method(client, '_resetIdleTimer', () => { resetCalled = true; });
+    await client._send('ready');
+    assert.strictEqual(resetCalled, true);
+  });
+
+  it('does not reset idle timer when _active is false (shutdown path)', async () => {
+    const { client } = makeClient();
+    client._active = false;
+    let resetCalled = false;
+    mock.method(client, '_resetIdleTimer', () => { resetCalled = true; });
+    await client._send('ready');
+    assert.strictEqual(resetCalled, false);
+  });
+});
+
 // ── API type validation ───────────────────────────────────────────────────────
 describe('StoreClient API type validation', () => {
   it('set() throws TypeError for non-string key', async () => {
@@ -489,6 +531,7 @@ describe('StoreClient _send', () => {
   it('rejects when WS not open', async () => {
     const client = new StoreClient();
     client._ws = null;
+    client._reconnect = false; // prevent _ensureConnected from attempting a real connect
     await assert.rejects(() => client._send('get', ['k']), /WebSocket not connected/);
   });
 
@@ -509,6 +552,9 @@ describe('StoreClient _send', () => {
 
     const sendPromise = client._send('get', ['k']);
     const rejectPromise = assert.rejects(sendPromise, /Request timed out/);
+    // _send is now async (await _ensureConnected), so the 30s timer is created
+    // on the next microtask tick — drain that before advancing fake clock
+    await new Promise((r) => setImmediate(r));
     mock.timers.tick(30_001);
     await new Promise((r) => setImmediate(r));
     await rejectPromise;
@@ -557,9 +603,7 @@ describe('StoreClient ready', () => {
 
   it('sets _active and is idempotent (second call is no-op)', async () => {
     const client = new StoreClient({ url: 'ws://mock' });
-    client._reconnect = false;
-    // mock connect so we don't hit the network
-    mock.method(client, 'connect', async () => {});
+    mock.method(client, '_connectForShutdown', async () => false);
     await client.ready();
     assert.strictEqual(client._active, true);
     await client.ready(); // second call — no-op (returns early)
@@ -744,21 +788,75 @@ describe('StoreClient GET serialize error during promotion', () => {
   });
 });
 
-// ── ready() catches connect() rejection ───────────────────────────────────────
-describe('StoreClient ready catches connect rejection', () => {
+// ── ready(): no auto-connect ──────────────────────────────────────────────────
+describe('StoreClient ready (connect-on-demand)', () => {
   afterEach(() => mock.restoreAll());
 
-  it('logs warning and continues when connect() rejects', async () => {
+  it('does not call connect() during startup', async () => {
     const client = new StoreClient({ url: 'ws://mock' });
-    client._reconnect = false;
-    mock.method(client, 'connect', async () => {
-      throw new Error('connect boom');
-    });
-    // ready() should not throw even if connect() rejects
+    let connectCalled = false;
+    mock.method(client, 'connect', async () => { connectCalled = true; });
     await client.ready();
-    assert.strictEqual(client._active, true);
-    // Give the .catch() microtask a chance to run
-    await new Promise((r) => setImmediate(r));
+    assert.strictEqual(connectCalled, false);
     await client.close();
+  });
+});
+
+// ── close(): shutdown sequence ────────────────────────────────────────────────
+describe('StoreClient close (shutdown sequence)', () => {
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
+
+  it('clears idle timer at start of shutdown', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const { client } = makeClient();
+    let idleFired = false;
+    mock.method(client, '_disconnectIdle', () => { idleFired = true; });
+    client._resetIdleTimer();
+    mock.method(client, '_connectForShutdown', async () => true);
+    mock.method(client, '_demoteAll', async () => {});
+    await client.close();
+    mock.timers.tick(StoreClient.IDLE_DISCONNECT_MS + 1000);
+    assert.strictEqual(idleFired, false);
+    assert.strictEqual(client._idleTimer, null);
+  });
+
+  it('calls _demoteAll when _connectForShutdown returns true', async () => {
+    const { client } = makeClient();
+    mock.method(client, '_connectForShutdown', async () => true);
+    let demoteAllCalled = false;
+    mock.method(client, '_demoteAll', async () => { demoteAllCalled = true; });
+    await client.close();
+    assert.strictEqual(demoteAllCalled, true);
+  });
+
+  it('skips _demoteAll and logs warning when _connectForShutdown returns false and items exist', async () => {
+    const client = new StoreClient({ url: 'ws://mock' });
+    client._active = true;
+    client._metadata.set('k', { location: 0, dataSizeV8: 10, expired: Infinity });
+    const logs = [];
+    client._log = (level, ...rest) => logs.push([level, rest.join(' ')]);
+    mock.method(client, '_connectForShutdown', async () => false);
+    let demoteAllCalled = false;
+    mock.method(client, '_demoteAll', async () => { demoteAllCalled = true; });
+    await client.close();
+    assert.strictEqual(demoteAllCalled, false);
+    assert.ok(
+      logs.some(([level, msg]) => level === 'warn' && msg.includes('1 items not persisted')),
+      'expected warning about unpersisted items',
+    );
+  });
+
+  it('does not log warning when server unreachable but no in-memory items', async () => {
+    const client = new StoreClient({ url: 'ws://mock' });
+    client._active = true;
+    const logs = [];
+    client._log = (level, ...rest) => logs.push([level, rest.join(' ')]);
+    mock.method(client, '_connectForShutdown', async () => false);
+    mock.method(client, '_demoteAll', async () => {});
+    await client.close();
+    assert.ok(!logs.some(([level]) => level === 'warn'));
   });
 });

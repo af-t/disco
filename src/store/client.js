@@ -14,9 +14,15 @@ class StoreClient extends StoreBase {
   _retryAttempt = 0;
   _retryTimer = null;
 
+  // connect-on-demand state
+  _idleTimer = null;
+  _connectPromise = null;
+  _intentionalClose = false;
+
   // Exponential backoff constants (fixes B3)
   static RETRY_BASE_DELAY = 1000;
   static RETRY_MAX_DELAY = 300_000; // 5 minutes cap
+  static IDLE_DISCONNECT_MS = 90_000; // disconnect after 90s of inactivity
 
   constructor(config = {}) {
     super(config);
@@ -35,13 +41,7 @@ class StoreClient extends StoreBase {
     this._log('info', 'starting up');
     this._startQueueWorker();
     this._startMaintainer();
-
-    // Try to connect in the background, don't block the bot startup
-    this.connect().catch((err) => {
-      this._log('warn', `initial server connection failed: ${err.message}, will retry in background`);
-    });
-
-    this._log('info', 'startup completed (memory-first mode)');
+    this._log('info', 'startup completed (connect-on-demand mode)');
   }
 
   async close() {
@@ -49,10 +49,11 @@ class StoreClient extends StoreBase {
     this._log('info', 'shutting down');
 
     this._active = false;
-    this._reconnect = false;
+    clearTimeout(this._idleTimer);
+    this._idleTimer = null;
     this._notifier?.(); // wake the sleeping worker so it can exit
 
-    // Drain remaining queued tasks before demoting
+    // Drain remaining queued tasks before persisting
     while (this._queues.length) {
       const task = this._queues.shift();
       try {
@@ -62,7 +63,21 @@ class StoreClient extends StoreBase {
       }
     }
 
-    await this._demoteAll();
+    // Try to reach the server for a clean demote (keeps _reconnect=true so connect() works)
+    const connected = await this._connectForShutdown(30_000);
+    this._reconnect = false;
+    clearTimeout(this._retryTimer);
+
+    if (connected) {
+      await this._demoteAll();
+    } else {
+      const unpersisted = [...this._metadata.values()].filter(
+        (m) => m.location === 0 && m.dataSizeV8 > 0,
+      ).length;
+      if (unpersisted > 0) {
+        this._log('warn', `shutdown: server unreachable, ${unpersisted} items not persisted`);
+      }
+    }
 
     if (this._ws) {
       try {
@@ -437,6 +452,48 @@ class StoreClient extends StoreBase {
 
   // --- WebSocket connection ---
 
+  _resetIdleTimer() {
+    clearTimeout(this._idleTimer);
+    this._idleTimer = setTimeout(
+      () => this._disconnectIdle(),
+      StoreClient.IDLE_DISCONNECT_MS,
+    ).unref();
+  }
+
+  _disconnectIdle() {
+    if (!this._ws) return;
+    this._intentionalClose = true;
+    this._ws.close();
+  }
+
+  async _connectForShutdown(timeoutMs) {
+    if (this._ws?.readyState === this._WebSocketImpl.OPEN) return true;
+    let timeoutId;
+    // reuse in-flight connectPromise to avoid starting a duplicate connect
+    const connectWait = this._connectPromise ?? this.connect();
+    const result = await Promise.race([
+      Promise.resolve(connectWait)
+        .then(() => this._ws?.readyState === this._WebSocketImpl.OPEN)
+        .catch(() => false),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => resolve(false), timeoutMs).unref();
+      }),
+    ]);
+    clearTimeout(timeoutId);
+    return result;
+  }
+
+  async _ensureConnected() {
+    if (this._ws?.readyState === this._WebSocketImpl.OPEN) return;
+    if (!this._connectPromise && !this._connecting) {
+      this._retryAttempt = 0; // start on-demand connect without backoff delay
+      this._connectPromise = this.connect().finally(() => {
+        this._connectPromise = null;
+      });
+    }
+    return this._connectPromise;
+  }
+
   /**
    * Schedule a reconnect with exponential backoff + jitter (fixes B3).
    * Mirrors the pattern from level_1.js for consistency.
@@ -500,6 +557,7 @@ class StoreClient extends StoreBase {
 
       on('error', (event) => {
         this._connecting = false;
+        clearTimeout(this._idleTimer); // stale idle timer must not fire on a new connection
         if (this._ws) {
           removeAll();
           ws.close();
@@ -529,11 +587,16 @@ class StoreClient extends StoreBase {
 
       on('close', (_event) => {
         this._connecting = false;
+        clearTimeout(this._idleTimer); // stale idle timer must not fire on a new connection
         if (this._ws) {
           removeAll();
           this._ws = null;
         }
-        if (this._reconnect) {
+        if (this._intentionalClose) {
+          // idle-initiated close — don't retry, wait for next on-demand connect
+          this._intentionalClose = false;
+          resolve();
+        } else if (this._reconnect) {
           this._log('info', 'server connection closed, reconnecting...');
           this._retryAttempt++;
           this._scheduleRetry(resolve);
@@ -544,7 +607,12 @@ class StoreClient extends StoreBase {
     });
   }
 
-  _send(op, args = []) {
+  async _send(op, args = []) {
+    // fast path — avoid microtask yield when already connected
+    if (!this._ws || this._ws.readyState !== this._WebSocketImpl.OPEN) {
+      await this._ensureConnected();
+    }
+
     if (!this._ws || this._ws.readyState !== this._WebSocketImpl.OPEN) {
       return Promise.reject(new Error('WebSocket not connected'));
     }
@@ -577,6 +645,8 @@ class StoreClient extends StoreBase {
       const payload = JSON.stringify({ op, id, args });
       try {
         this._ws.send(payload);
+        // reset idle timer only while the store is active (not during shutdown)
+        if (this._active) this._resetIdleTimer();
       } catch (err) {
         settle(reject, err);
       }

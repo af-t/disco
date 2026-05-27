@@ -28,10 +28,17 @@ wss.on('connection', (ws, req) => {
   req.socket.setNoDelay(true);
   ws._socket.setNoDelay(true);
 
-  // Apply timeout
-  setTimeout(() => req.socket.destroy(), 180_000).unref();
+  // Close connection after 5 minutes of silence
+  const IDLE_TIMEOUT_MS = 300_000;
+  let idleTimer = null;
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => ws.close(), IDLE_TIMEOUT_MS).unref();
+  };
+  resetIdle();
 
   ws.on('message', async (m) => {
+    resetIdle(); // reset idle timer on every message
     try {
       m = JSON.parse(m);
     } catch {
@@ -83,7 +90,10 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  ws.on('close', () => requestLog.delete(clientIp));
+  ws.on('close', () => {
+    clearTimeout(idleTimer);
+    requestLog.delete(clientIp);
+  });
 });
 
 server.listen(process.env.STORE_SERVER_PORT || 3000);
