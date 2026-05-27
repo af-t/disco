@@ -46,7 +46,8 @@ const execute = async (client, message, args) => {
       if (messages.length !== filteredMsgs.length || !before) break;
     }
 
-    messagesToDelete.push(message);
+    // slash command has no real channel message to delete
+    if (!message.isInteraction) messagesToDelete.push(message);
   }
 
   for (let i = 0; i < messagesToDelete.length; i += 100) {
@@ -64,8 +65,12 @@ const execute = async (client, message, args) => {
   }
 
   if (deleted > 0) {
-    const content = `🧹 Deleted **${deleted - 1}** messages.`;
-    const reply = await client.reply(message, content);
+    // prefix commands include the command message in the count; slash commands do not
+    const displayCount = message.isInteraction ? deleted : deleted - 1;
+    const content = `🧹 Deleted **${displayCount}** messages.`;
+    const reply = (message.isInteraction || !client.sendMessage)
+      ? await client.reply(message, content)
+      : await client.sendMessage(message.channel_id, content);
     if (reply?.channel_id && reply?.id)
       setTimeout(
         () =>

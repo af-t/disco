@@ -181,6 +181,66 @@ test('purge should use bulk delete for multiple messages', async () => {
   assert.ok(bulkDeleteCalls.length > 0, 'Bulk delete should be called for chunks > 1');
 });
 
+describe('purge slash command (isInteraction)', () => {
+  it('does not pass interaction.id to deleteMessage or bulkDeleteMessages', async () => {
+    const INTERACTION_ID = '999000000000000001';
+    const allDeletedIds = [];
+    const messages = [
+      { id: '800000000000000001', timestamp: new Date().toISOString() },
+      { id: '800000000000000002', timestamp: new Date().toISOString() },
+    ];
+    const client = createMockClient({ messages });
+    client.deleteMessage = async (_ch, id) => allDeletedIds.push(id);
+    client.bulkDeleteMessages = async (_ch, ids) => allDeletedIds.push(...ids);
+    client.reply = async () => ({ isInteractionResponse: true, channel_id: CHANNEL_ID });
+    client.sendMessage = async () => ({ id: 'reply_001', channel_id: CHANNEL_ID });
+
+    const slashMsg = {
+      id: INTERACTION_ID,
+      channel_id: CHANNEL_ID,
+      guild_id: GUILD_ID,
+      isInteraction: true,
+      author: { id: USER_ID, username: 'Mod' },
+    };
+
+    await purgeModule.execute(client, slashMsg, ['2']);
+
+    assert.ok(
+      !allDeletedIds.includes(INTERACTION_ID),
+      `interaction.id ${INTERACTION_ID} must not appear in delete calls`,
+    );
+  });
+
+  it('reports the exact number of messages deleted, not N-1', async () => {
+    const replyCalls = [];
+    const messages = [
+      { id: '800000000000000001', timestamp: new Date().toISOString() },
+      { id: '800000000000000002', timestamp: new Date().toISOString() },
+    ];
+    const client = createMockClient({ messages });
+    client.bulkDeleteMessages = async () => {};
+    client.deleteMessage = async () => {};
+    client.reply = async (_msg, content) => {
+      replyCalls.push(content);
+      return { isInteractionResponse: true, channel_id: CHANNEL_ID };
+    };
+
+    const slashMsg = {
+      id: '999000000000000001',
+      channel_id: CHANNEL_ID,
+      guild_id: GUILD_ID,
+      isInteraction: true,
+      author: { id: USER_ID, username: 'Mod' },
+    };
+
+    await purgeModule.execute(client, slashMsg, ['2']);
+
+    const reply = replyCalls.find((c) => c.includes('Deleted'));
+    assert.ok(reply, 'Should send a deletion confirmation');
+    assert.ok(reply.includes('**2**'), `Expected "Deleted **2** messages", got: ${reply}`);
+  });
+});
+
 describe('purge notice and auto-delete failures', () => {
   afterEach(() => {
     mock.restoreAll();

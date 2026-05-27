@@ -162,11 +162,12 @@ export default async (client, interaction) => {
 
   // Support deferred responses for slow commands (fixes M5)
   mockMessage.defer = async (ephemeral = true) => {
-    deferred = true;
-    return client.createInteractionResponse(interaction.id, interaction.token, {
+    await client.createInteractionResponse(interaction.id, interaction.token, {
       type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
       data: ephemeral ? { flags: 64 } : undefined,
     });
+    // only mark deferred after the API call succeeds
+    deferred = true;
   };
 
   // Helper to parse interaction options into args array

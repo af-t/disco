@@ -657,6 +657,44 @@ describe('interaction_create mockMessage shim', () => {
   });
 });
 
+describe('interaction_create defer failure', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('reply() uses createInteractionResponse type 4 when defer() API call fails', async () => {
+    const type4Responses = [];
+    const editCalls = [];
+
+    const client = createMockClient({
+      commands: {
+        slow: {
+          data: { name: 'slow', description: 'x' },
+          permissions: [],
+          execute: async (_c, msg) => {
+            await msg.defer(true).catch(() => {}); // swallow defer failure
+            await msg.reply('hello'); // must use type 4, not editOriginal
+          },
+        },
+      },
+    });
+
+    client.createInteractionResponse = async (_id, _tok, body) => {
+      if (body.type === 5) throw new Error('failed to defer');
+      type4Responses.push(body);
+    };
+    client.editOriginalInteractionResponse = async (_appId, _tok, body) => {
+      editCalls.push(body);
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'slow', options: [] } }));
+
+    assert.ok(
+      type4Responses.some((r) => r.type === 4 && r.data?.content === 'hello'),
+      'reply should fall back to createInteractionResponse type 4 when defer failed',
+    );
+    assert.strictEqual(editCalls.length, 0, 'editOriginalInteractionResponse must not be called');
+  });
+});
+
 describe('interaction_create extra coverage', () => {
   afterEach(() => mock.restoreAll());
 
