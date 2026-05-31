@@ -208,6 +208,7 @@ class StoreManager extends StoreBase {
             }
           }
           this._metadata.clear();
+          this._dirty = true;
           this._data.clear();
           if (this.diskPath) {
             await fs.rm(this.diskPath, { force: true, recursive: true });
@@ -262,6 +263,7 @@ class StoreManager extends StoreBase {
           }
           this._data.set(key, data);
           this._metadata.set(key, meta);
+          this._dirty = true;
         };
 
       case ACTION.GET:
@@ -310,6 +312,7 @@ class StoreManager extends StoreBase {
               meta.expired = meta.customTTL ? Date.now() + meta.customTTL : Date.now() + this.memoryTTL;
               this._data.set(key, value);
               this._metadata.set(key, meta);
+              this._dirty = true;
               await fs
                 .rm(meta.locationFile)
                 .catch((err) =>
@@ -328,6 +331,7 @@ class StoreManager extends StoreBase {
           // Memory hit — refresh sliding TTL
           meta.expired = meta.customTTL ? Date.now() + meta.customTTL : Date.now() + this.memoryTTL;
           this._metadata.set(key, meta);
+          this._dirty = true;
           this._stats.cache.hits++;
           return this._data.get(key);
         };
@@ -381,12 +385,14 @@ class StoreManager extends StoreBase {
       meta.expired = meta.isCache ? Date.now() + this.diskTTL : Infinity;
       this._data.delete(key);
       this._metadata.set(key, meta);
+      this._dirty = true;
       this._stats.cache.demotions++;
       this._log('debug', 'demoted to disk:', key);
     } catch (err) {
       meta.location = LOCATION.MEMORY;
       meta.expired = Date.now() + this.memoryTTL;
       this._metadata.set(key, meta);
+      this._dirty = true;
       this._stats.errors.diskWrite++;
       this._log('error', 'failed to demote key', key, err);
     }
@@ -421,6 +427,7 @@ class StoreManager extends StoreBase {
           dropped++;
         }
       }
+      this._dirty = dropped > 0;
       this._log('info', 'metadata loaded from disk', dropped ? `(dropped ${dropped} volatile entries)` : '');
     } catch (err) {
       this._log('error', 'metadata load failed', err);
@@ -434,9 +441,11 @@ class StoreManager extends StoreBase {
 
   async _saveMetadata() {
     if (!this.diskPath) return;
+    if (!this._dirty) return;
     try {
       const data = serialize(this._metadata);
       await this._atomicWrite(join(this.diskPath, 'metadata.dat'), data);
+      this._dirty = false;
       this._log('debug', 'metadata saved');
     } catch (err) {
       this._log('error', 'failed to save metadata', err);

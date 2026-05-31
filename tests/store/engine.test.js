@@ -600,6 +600,7 @@ describe('StoreEngine durability: atomic writes', () => {
         throw new Error('rename failed');
       });
       engine._metadata.set('B', { location: 0, created: Date.now(), expired: Infinity, dataSizeV8: 0 });
+      engine._dirty = true; // direct mutation bypasses handlers that set the flag
       await engine._saveMetadata(); // swallows the rename error
 
       // the old file survives the failed write, no torn/partial replacement

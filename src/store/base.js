@@ -13,6 +13,7 @@ class StoreBase {
   _queues = [];
   _active = false;
   _workerLoop = null;
+  _dirty = false;
 
   // Rolling queue-length accumulators
   _queueLenSum = 0;
@@ -342,6 +343,7 @@ class StoreBase {
     await this._deleteFromBackend(key, meta);
 
     this._metadata.delete(key);
+    this._dirty = true;
     this._data.delete(key);
     this._log('debug', 'deleted key:', key);
   }

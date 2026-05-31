@@ -5,6 +5,7 @@ node_modules
 .vscode
 *.lock
 database
+storage/
 workspaces/
 .worktrees/
 .agent/
