@@ -5,4 +5,5 @@ try {
   // .env is optional in production deployments
 }
 
+await import('./dns-override.js');
 await import('./app.js');

@@ -146,6 +146,7 @@ const CHILD_ENV_KEYS = [
   'PATH',
   'HOME',
   'NODE_OPTIONS',
+  'DNS_FORCE_IPV4',
 ];
 
 export class AgentPool {

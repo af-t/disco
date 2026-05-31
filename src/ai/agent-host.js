@@ -1,3 +1,4 @@
+import '../dns-override.js';
 import path from 'node:path';
 import createAgent from 'openrouter';
 import { MSG } from './ipc.js';
