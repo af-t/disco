@@ -12,6 +12,7 @@ class StoreBase {
   _data = new Map();
   _queues = [];
   _active = false;
+  _workerLoop = null;
 
   // Rolling queue-length accumulators
   _queueLenSum = 0;
@@ -31,6 +32,7 @@ class StoreBase {
 
     this.memoryTTL = this._validateInt(config.memoryTTL) ?? 300_000;
     this.maxMemory = this._validateInt(config.maxMemory) ?? Math.floor(heapLimit * 0.3);
+    this.maintainInterval = this._validateInt(config.maintainInterval) ?? 15_000;
     this.logger = config.logger?.createLogger?.(this.constructor.name);
   }
 
@@ -260,7 +262,7 @@ class StoreBase {
   async _startMaintainer() {
     while (this._active) {
       await new Promise((resolve) => {
-        setTimeout(resolve, 15_000).unref();
+        setTimeout(resolve, this.maintainInterval).unref();
       });
       if (!this._active) break;
 
@@ -312,6 +314,9 @@ class StoreBase {
 
         self._stats.performance.maintenanceCycles++;
         self._stats.performance.lastMaintenanceDuration = Date.now() - startTime;
+
+        // checkpoint backend state so a crash does not lose it
+        await self._onMaintainerCycle();
       };
 
       this._queues.push(maintenanceTask);
@@ -344,6 +349,31 @@ class StoreBase {
   /** @abstract */
   async _deleteFromBackend(_key, _meta) {
     // Override in subclass
+  }
+
+  // Periodic checkpoint hook, overridden by backends that persist
+  async _onMaintainerCycle() {}
+
+  // Stop the worker and wait for its in-flight task, then drain leftovers.
+  // Without the await, close() would run tasks concurrently with the worker.
+  async _drainAndStopWorker() {
+    this._active = false;
+    this._notifier?.(); // wake a sleeping worker so it can exit
+    if (this._workerLoop) {
+      try {
+        await this._workerLoop;
+      } catch {
+        // worker errors are already logged inside the loop
+      }
+    }
+    while (this._queues.length) {
+      const task = this._queues.shift();
+      try {
+        await task();
+      } catch {
+        // already logged inside tasks
+      }
+    }
   }
 
   /** @abstract */

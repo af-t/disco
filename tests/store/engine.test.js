@@ -2,7 +2,8 @@ import test from 'node:test';
 import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { deserialize } from 'node:v8';
 import os from 'node:os';
 import Engine from '../../src/store/engine.js';
 
@@ -550,6 +551,138 @@ describe('StoreManager argument and lifecycle guards', () => {
       await engine._demote('ck');
       assert.strictEqual(engine._metadata.get('ck').location, 1);
       assert.deepStrictEqual(await engine.get('ck'), { v: 1 });
+    } finally {
+      await engine.close();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('StoreEngine durability: atomic writes', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('leaves no temp file and keeps the item in memory when the data rename fails', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_atomic_data_' + Date.now());
+    const engine = new Engine({ diskPath });
+    await engine.ready();
+    try {
+      await engine.set('k', { v: 1 });
+      mock.method(fs, 'rename', async () => {
+        throw new Error('rename failed');
+      });
+      await engine._demote('k');
+
+      const meta = engine._metadata.get('k');
+      assert.strictEqual(meta.location, 0); // stayed in MEMORY
+      assert.strictEqual(engine._stats.errors.diskWrite, 1);
+      // temp file was cleaned up, bucket dir is empty
+      const entries = await fs.readdir(dirname(meta.locationFile)).catch(() => []);
+      assert.deepStrictEqual(entries, []);
+    } finally {
+      mock.restoreAll();
+      engine._active = false;
+      engine._notifier?.();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the existing metadata file intact when the metadata rename fails', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_atomic_meta_' + Date.now());
+    const engine = new Engine({ diskPath });
+    await engine.ready();
+    try {
+      await engine.set('A', 'first');
+      await engine._saveMetadata();
+      const good = deserialize(await fs.readFile(join(diskPath, 'metadata.dat')));
+      assert.ok(good.has('A'));
+
+      mock.method(fs, 'rename', async () => {
+        throw new Error('rename failed');
+      });
+      engine._metadata.set('B', { location: 0, created: Date.now(), expired: Infinity, dataSizeV8: 0 });
+      await engine._saveMetadata(); // swallows the rename error
+
+      // the old file survives the failed write, no torn/partial replacement
+      const after = deserialize(await fs.readFile(join(diskPath, 'metadata.dat')));
+      assert.ok(after.has('A'));
+      assert.strictEqual(after.has('B'), false);
+      const leftovers = (await fs.readdir(diskPath)).filter((f) => f.includes('.tmp'));
+      assert.deepStrictEqual(leftovers, []);
+    } finally {
+      mock.restoreAll();
+      engine._active = false;
+      engine._notifier?.();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('StoreEngine durability: periodic metadata flush', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('recovers disk-resident items after an unclean shutdown via _onMaintainerCycle', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_recover_' + Date.now());
+    const engine1 = new Engine({ diskPath });
+    await engine1.ready();
+    await engine1.set('persist', 'value', false);
+    await engine1._demote('persist'); // data on disk, metadata only in RAM
+    await engine1._onMaintainerCycle(); // periodic flush persists metadata
+    // simulate a crash: stop the loops without a graceful close()
+    engine1._active = false;
+    engine1._notifier?.();
+
+    const engine2 = new Engine({ diskPath });
+    await engine2.ready();
+    try {
+      assert.strictEqual(await engine2.get('persist'), 'value');
+    } finally {
+      await engine2.close();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+
+  it('drops memory-resident entries on load to keep has/get consistent', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_prune_' + Date.now());
+    const engine1 = new Engine({ diskPath });
+    await engine1.ready();
+    await engine1.set('mem', 'in-ram', false); // never demoted, lives only in memory
+    await engine1.set('disk', 'on-disk', false);
+    await engine1._demote('disk');
+    await engine1._onMaintainerCycle();
+    engine1._active = false;
+    engine1._notifier?.();
+
+    const engine2 = new Engine({ diskPath });
+    await engine2.ready();
+    try {
+      // mem had no data on disk, must not look present after recovery
+      assert.strictEqual(await engine2.has('mem'), false);
+      assert.strictEqual(await engine2.get('mem'), undefined);
+      // disk item is fully recoverable
+      assert.strictEqual(await engine2.get('disk'), 'on-disk');
+    } finally {
+      await engine2.close();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+
+  it('persists metadata periodically through the maintainer loop', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_periodic_' + Date.now());
+    const engine = new Engine({ diskPath, maintainInterval: 20 });
+    await engine.ready();
+    try {
+      await engine.set('x', 'y', false);
+      const metadataPath = join(diskPath, 'metadata.dat');
+      // metadata.dat must appear without an explicit close()
+      let exists = false;
+      for (let i = 0; i < 50 && !exists; i++) {
+        exists = await fs
+          .access(metadataPath)
+          .then(() => true)
+          .catch(() => false);
+        if (!exists) await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.strictEqual(exists, true);
     } finally {
       await engine.close();
       await fs.rm(diskPath, { recursive: true, force: true });

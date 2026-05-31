@@ -30,7 +30,7 @@ class StoreManager extends StoreBase {
 
     this._active = true;
     this._log('info', 'starting up');
-    this._startQueueWorker();
+    this._workerLoop = this._startQueueWorker();
     this._startMaintainer();
 
     try {
@@ -54,18 +54,8 @@ class StoreManager extends StoreBase {
     if (!this._active) return false;
     this._log('info', 'shutting down');
 
-    this._active = false;
-    this._notifier?.(); // wake the sleeping worker so it can exit
-
-    // Drain remaining queued tasks before demoting
-    while (this._queues.length) {
-      const task = this._queues.shift();
-      try {
-        await task();
-      } catch {
-        // already logged inside tasks
-      }
-    }
+    // Stop the worker before draining so they never run tasks concurrently
+    await this._drainAndStopWorker();
 
     await this._demoteAll();
     await this._saveMetadata();
@@ -385,7 +375,7 @@ class StoreManager extends StoreBase {
     try {
       const raw = serialize(this._data.get(key));
       await fs.mkdir(dirname(meta.locationFile), { recursive: true });
-      await fs.writeFile(meta.locationFile, raw);
+      await this._atomicWrite(meta.locationFile, raw);
 
       meta.location = LOCATION.DISK;
       meta.expired = meta.isCache ? Date.now() + this.diskTTL : Infinity;
@@ -421,20 +411,47 @@ class StoreManager extends StoreBase {
     try {
       const data = await fs.readFile(metadataPath);
       this._metadata = deserialize(data);
-      this._log('info', 'metadata loaded from disk');
+
+      // memory-resident entries have no on-disk data after a crash;
+      // drop them so has()/get() stay consistent
+      let dropped = 0;
+      for (const [key, meta] of this._metadata) {
+        if (meta.location === LOCATION.MEMORY) {
+          this._metadata.delete(key);
+          dropped++;
+        }
+      }
+      this._log('info', 'metadata loaded from disk', dropped ? `(dropped ${dropped} volatile entries)` : '');
     } catch (err) {
       this._log('error', 'metadata load failed', err);
     }
+  }
+
+  // Persist the checkpoint each maintainer cycle, not only on close()
+  async _onMaintainerCycle() {
+    await this._saveMetadata();
   }
 
   async _saveMetadata() {
     if (!this.diskPath) return;
     try {
       const data = serialize(this._metadata);
-      await fs.writeFile(join(this.diskPath, 'metadata.dat'), data);
+      await this._atomicWrite(join(this.diskPath, 'metadata.dat'), data);
       this._log('debug', 'metadata saved');
     } catch (err) {
       this._log('error', 'failed to save metadata', err);
+    }
+  }
+
+  // Write via a temp file then rename so a crash never leaves a torn file
+  async _atomicWrite(filePath, data) {
+    const tmp = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    try {
+      await fs.writeFile(tmp, data);
+      await fs.rename(tmp, filePath);
+    } catch (err) {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+      throw err;
     }
   }
 

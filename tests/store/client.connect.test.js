@@ -264,7 +264,9 @@ describe('StoreClient _ensureConnected', () => {
     const ws = new MockWS('ws://mock');
     client._ws = ws;
     let connectCalled = false;
-    mock.method(client, 'connect', async () => { connectCalled = true; });
+    mock.method(client, 'connect', async () => {
+      connectCalled = true;
+    });
     await client._ensureConnected();
     assert.strictEqual(connectCalled, false);
   });
@@ -272,7 +274,9 @@ describe('StoreClient _ensureConnected', () => {
   it('calls connect() when _ws is null', async () => {
     const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
     let connectCalled = false;
-    mock.method(client, 'connect', async () => { connectCalled = true; });
+    mock.method(client, 'connect', async () => {
+      connectCalled = true;
+    });
     await client._ensureConnected();
     assert.strictEqual(connectCalled, true);
   });
@@ -281,10 +285,15 @@ describe('StoreClient _ensureConnected', () => {
     const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
     let callCount = 0;
     let resolveConnect;
-    mock.method(client, 'connect', () => new Promise((r) => {
-      callCount++;
-      resolveConnect = r;
-    }));
+    mock.method(
+      client,
+      'connect',
+      () =>
+        new Promise((r) => {
+          callCount++;
+          resolveConnect = r;
+        }),
+    );
     const p1 = client._ensureConnected();
     const p2 = client._ensureConnected();
     resolveConnect();
@@ -330,7 +339,9 @@ describe('StoreClient idle disconnect', () => {
     const ws = new MockWS('ws://mock');
     client._ws = ws;
     let idleFired = false;
-    mock.method(client, '_disconnectIdle', () => { idleFired = true; });
+    mock.method(client, '_disconnectIdle', () => {
+      idleFired = true;
+    });
     client._resetIdleTimer();
     assert.strictEqual(idleFired, false);
     mock.timers.tick(StoreClient.IDLE_DISCONNECT_MS);
@@ -371,7 +382,9 @@ describe('StoreClient idle disconnect', () => {
     const connectPromise = client.connect();
     // arm an idle timer
     let idleFired = false;
-    mock.method(client, '_disconnectIdle', () => { idleFired = true; });
+    mock.method(client, '_disconnectIdle', () => {
+      idleFired = true;
+    });
     client._resetIdleTimer();
     // simulate unexpected server close
     client._reconnect = false;
@@ -412,7 +425,14 @@ describe('StoreClient _connectForShutdown', () => {
     mock.timers.enable({ apis: ['setTimeout'] });
     const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
     let resolveConnect;
-    mock.method(client, 'connect', () => new Promise((r) => { resolveConnect = r; }));
+    mock.method(
+      client,
+      'connect',
+      () =>
+        new Promise((r) => {
+          resolveConnect = r;
+        }),
+    );
     const resultPromise = client._connectForShutdown(100);
     mock.timers.tick(101);
     const result = await resultPromise;
@@ -432,10 +452,14 @@ describe('StoreClient _connectForShutdown', () => {
   it('awaits existing _connectPromise instead of starting a duplicate connect', async () => {
     const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
     let connectCalled = false;
-    mock.method(client, 'connect', async () => { connectCalled = true; });
+    mock.method(client, 'connect', async () => {
+      connectCalled = true;
+    });
     // simulate an in-flight connect by setting _connectPromise directly
     let resolveInFlight;
-    client._connectPromise = new Promise((r) => { resolveInFlight = r; });
+    client._connectPromise = new Promise((r) => {
+      resolveInFlight = r;
+    });
     const resultPromise = client._connectForShutdown(5000);
     // resolve in-flight connect with a live WS
     client._ws = new MockWS('ws://mock');
@@ -443,5 +467,85 @@ describe('StoreClient _connectForShutdown', () => {
     const result = await resultPromise;
     assert.strictEqual(result, true);
     assert.strictEqual(connectCalled, false); // no duplicate connect started
+  });
+});
+
+// A socket that stays in CONNECTING forever — simulates an unreachable server
+class StuckWS {
+  static OPEN = 1;
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0; // CONNECTING, never opens
+    this.binaryType = 'arraybuffer';
+  }
+  addEventListener() {}
+  removeEventListener() {}
+  send() {}
+  close() {
+    this.readyState = 3;
+  }
+}
+
+describe('StoreClient _send bounded connect (queue deadlock fix)', () => {
+  afterEach(() => mock.restoreAll());
+
+  it(
+    'rejects within the connect timeout instead of hanging when the server is unreachable',
+    { timeout: 5000 },
+    async () => {
+      const client = new StoreClient({ url: 'ws://down', webSocketImpl: StuckWS, connectTimeoutMs: 50 });
+      const start = Date.now();
+      await assert.rejects(() => client._send('get', ['k']), /not connected/);
+      assert.ok(Date.now() - start < 4000, 'should fail fast, not block on a dead connection');
+      client._reconnect = false;
+    },
+  );
+
+  it('a failed _send does not freeze later local operations in the queue', { timeout: 5000 }, async () => {
+    const client = new StoreClient({ url: 'ws://down', webSocketImpl: StuckWS, connectTimeoutMs: 50 });
+    mock.method(client, '_connectForShutdown', async () => false);
+    await client.ready();
+    try {
+      const attr = client.getAttr('a'); // triggers _send, will fail
+      await client.set('k', 'v'); // pure-memory op queued behind it
+      assert.strictEqual(await client.get('k'), 'v');
+      assert.strictEqual(await attr, undefined); // settled, not hung
+    } finally {
+      client._reconnect = false;
+      await client.close();
+    }
+  });
+});
+
+describe('StoreClient close drain ordering (worker overlap fix)', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('waits for the in-flight worker task before draining leftovers', { timeout: 5000 }, async () => {
+    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+    mock.method(client, '_connectForShutdown', async () => false);
+    await client.ready();
+
+    const order = [];
+    let releaseFirst;
+    let markStarted;
+    const firstStarted = new Promise((r) => (markStarted = r));
+
+    client._enqueueTask(async () => {
+      order.push('first-start');
+      markStarted();
+      await new Promise((res) => (releaseFirst = res));
+      order.push('first-end');
+    });
+    client._enqueueTask(async () => {
+      order.push('second');
+    });
+
+    await firstStarted; // worker is now mid the first task
+    const closing = client.close(); // called while the first task is in-flight
+    releaseFirst();
+    await closing;
+
+    // 'second' must run only after the in-flight task finished — no overlap
+    assert.deepStrictEqual(order, ['first-start', 'first-end', 'second']);
   });
 });

@@ -68,9 +68,10 @@ const execute = async (client, message, args) => {
     // prefix commands include the command message in the count; slash commands do not
     const displayCount = message.isInteraction ? deleted : deleted - 1;
     const content = `🧹 Deleted **${displayCount}** messages.`;
-    const reply = (message.isInteraction || !client.sendMessage)
-      ? await client.reply(message, content)
-      : await client.sendMessage(message.channel_id, content);
+    const reply =
+      message.isInteraction || !client.sendMessage
+        ? await client.reply(message, content)
+        : await client.sendMessage(message.channel_id, content);
     if (reply?.channel_id && reply?.id)
       setTimeout(
         () =>

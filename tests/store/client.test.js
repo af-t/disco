@@ -118,7 +118,9 @@ describe('StoreClient _send connect-on-demand', () => {
   it('skips _ensureConnected when WS is already OPEN (fast path)', async () => {
     const { client } = makeClient(); // WS is OPEN by default
     let ensureCalled = false;
-    mock.method(client, '_ensureConnected', async () => { ensureCalled = true; });
+    mock.method(client, '_ensureConnected', async () => {
+      ensureCalled = true;
+    });
     await client._send('ready');
     assert.strictEqual(ensureCalled, false);
   });
@@ -126,7 +128,9 @@ describe('StoreClient _send connect-on-demand', () => {
   it('resets idle timer after successful ws.send()', async () => {
     const { client } = makeClient();
     let resetCalled = false;
-    mock.method(client, '_resetIdleTimer', () => { resetCalled = true; });
+    mock.method(client, '_resetIdleTimer', () => {
+      resetCalled = true;
+    });
     await client._send('ready');
     assert.strictEqual(resetCalled, true);
   });
@@ -135,7 +139,9 @@ describe('StoreClient _send connect-on-demand', () => {
     const { client } = makeClient();
     client._active = false;
     let resetCalled = false;
-    mock.method(client, '_resetIdleTimer', () => { resetCalled = true; });
+    mock.method(client, '_resetIdleTimer', () => {
+      resetCalled = true;
+    });
     await client._send('ready');
     assert.strictEqual(resetCalled, false);
   });
@@ -795,7 +801,9 @@ describe('StoreClient ready (connect-on-demand)', () => {
   it('does not call connect() during startup', async () => {
     const client = new StoreClient({ url: 'ws://mock' });
     let connectCalled = false;
-    mock.method(client, 'connect', async () => { connectCalled = true; });
+    mock.method(client, 'connect', async () => {
+      connectCalled = true;
+    });
     await client.ready();
     assert.strictEqual(connectCalled, false);
     await client.close();
@@ -813,7 +821,9 @@ describe('StoreClient close (shutdown sequence)', () => {
     mock.timers.enable({ apis: ['setTimeout'] });
     const { client } = makeClient();
     let idleFired = false;
-    mock.method(client, '_disconnectIdle', () => { idleFired = true; });
+    mock.method(client, '_disconnectIdle', () => {
+      idleFired = true;
+    });
     client._resetIdleTimer();
     mock.method(client, '_connectForShutdown', async () => true);
     mock.method(client, '_demoteAll', async () => {});
@@ -827,7 +837,9 @@ describe('StoreClient close (shutdown sequence)', () => {
     const { client } = makeClient();
     mock.method(client, '_connectForShutdown', async () => true);
     let demoteAllCalled = false;
-    mock.method(client, '_demoteAll', async () => { demoteAllCalled = true; });
+    mock.method(client, '_demoteAll', async () => {
+      demoteAllCalled = true;
+    });
     await client.close();
     assert.strictEqual(demoteAllCalled, true);
   });
@@ -840,7 +852,9 @@ describe('StoreClient close (shutdown sequence)', () => {
     client._log = (level, ...rest) => logs.push([level, rest.join(' ')]);
     mock.method(client, '_connectForShutdown', async () => false);
     let demoteAllCalled = false;
-    mock.method(client, '_demoteAll', async () => { demoteAllCalled = true; });
+    mock.method(client, '_demoteAll', async () => {
+      demoteAllCalled = true;
+    });
     await client.close();
     assert.strictEqual(demoteAllCalled, false);
     assert.ok(

@@ -23,6 +23,7 @@ class StoreClient extends StoreBase {
   static RETRY_BASE_DELAY = 1000;
   static RETRY_MAX_DELAY = 300_000; // 5 minutes cap
   static IDLE_DISCONNECT_MS = 90_000; // disconnect after 90s of inactivity
+  static CONNECT_TIMEOUT_MS = 10_000; // cap a single _send connect wait
 
   constructor(config = {}) {
     super(config);
@@ -32,6 +33,7 @@ class StoreClient extends StoreBase {
     this._WebSocketImpl = config?.webSocketImpl ?? globalThis.WebSocket;
 
     this.serverTTL = this._validateInt(config.serverTTL) ?? 1_200_000;
+    this.connectTimeoutMs = this._validateInt(config.connectTimeoutMs) ?? StoreClient.CONNECT_TIMEOUT_MS;
   }
 
   async ready() {
@@ -39,7 +41,7 @@ class StoreClient extends StoreBase {
 
     this._active = true;
     this._log('info', 'starting up');
-    this._startQueueWorker();
+    this._workerLoop = this._startQueueWorker();
     this._startMaintainer();
     this._log('info', 'startup completed (connect-on-demand mode)');
   }
@@ -48,20 +50,11 @@ class StoreClient extends StoreBase {
     if (!this._active) return false;
     this._log('info', 'shutting down');
 
-    this._active = false;
     clearTimeout(this._idleTimer);
     this._idleTimer = null;
-    this._notifier?.(); // wake the sleeping worker so it can exit
 
-    // Drain remaining queued tasks before persisting
-    while (this._queues.length) {
-      const task = this._queues.shift();
-      try {
-        await task();
-      } catch {
-        // already logged inside tasks
-      }
-    }
+    // Stop the worker before draining so they never run tasks concurrently
+    await this._drainAndStopWorker();
 
     // Try to reach the server for a clean demote (keeps _reconnect=true so connect() works)
     const connected = await this._connectForShutdown(30_000);
@@ -71,9 +64,7 @@ class StoreClient extends StoreBase {
     if (connected) {
       await this._demoteAll();
     } else {
-      const unpersisted = [...this._metadata.values()].filter(
-        (m) => m.location === 0 && m.dataSizeV8 > 0,
-      ).length;
+      const unpersisted = [...this._metadata.values()].filter((m) => m.location === 0 && m.dataSizeV8 > 0).length;
       if (unpersisted > 0) {
         this._log('warn', `shutdown: server unreachable, ${unpersisted} items not persisted`);
       }
@@ -454,10 +445,7 @@ class StoreClient extends StoreBase {
 
   _resetIdleTimer() {
     clearTimeout(this._idleTimer);
-    this._idleTimer = setTimeout(
-      () => this._disconnectIdle(),
-      StoreClient.IDLE_DISCONNECT_MS,
-    ).unref();
+    this._idleTimer = setTimeout(() => this._disconnectIdle(), StoreClient.IDLE_DISCONNECT_MS).unref();
   }
 
   _disconnectIdle() {
@@ -492,6 +480,21 @@ class StoreClient extends StoreBase {
       });
     }
     return this._connectPromise;
+  }
+
+  // Bounded connect wait so a permanently unreachable server cannot
+  // freeze the sequential queue forever (background retries continue)
+  async _awaitConnection(timeoutMs) {
+    if (this._ws?.readyState === this._WebSocketImpl.OPEN) return;
+    let timeoutId;
+    const timeout = new Promise((resolve) => {
+      timeoutId = setTimeout(resolve, timeoutMs).unref();
+    });
+    try {
+      await Promise.race([Promise.resolve(this._ensureConnected()).catch(() => {}), timeout]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   /**
@@ -563,7 +566,7 @@ class StoreClient extends StoreBase {
           ws.close();
           this._ws = null;
         }
-        const msg = event.message ?? event.error?.message ?? 'unknown';
+        const msg = event.message || event.error?.message || 'unknown';
         this._log('warn', `server connection error: ${msg}`);
         this._retryAttempt++;
         this._scheduleRetry(resolve);
@@ -610,7 +613,7 @@ class StoreClient extends StoreBase {
   async _send(op, args = []) {
     // fast path — avoid microtask yield when already connected
     if (!this._ws || this._ws.readyState !== this._WebSocketImpl.OPEN) {
-      await this._ensureConnected();
+      await this._awaitConnection(this.connectTimeoutMs);
     }
 
     if (!this._ws || this._ws.readyState !== this._WebSocketImpl.OPEN) {
