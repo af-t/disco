@@ -1,5 +1,17 @@
 import { authorize } from './authorize.js';
 
+const DISCORD_EPOCH = 1420070400000n;
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Discord refuses to bulk-delete messages older than 2 weeks.
+function ageMs(id) {
+  try {
+    return Date.now() - Number((BigInt(id) >> 22n) + DISCORD_EPOCH);
+  } catch {
+    return null;
+  }
+}
+
 export const definition = {
   name: 'discord_bulk_delete',
   description:
@@ -18,9 +30,38 @@ export const definition = {
 export async function execute(ctx, input) {
   const auth = await authorize(ctx, input, 'MANAGE_MESSAGES');
   if (!auth.ok) return JSON.stringify(auth);
+
+  const ids = Array.isArray(input.message_ids) ? [...new Set(input.message_ids)] : [];
+  if (ids.length === 0) {
+    return JSON.stringify({ ok: false, error: 'message_ids must be a non-empty array' });
+  }
+
+  let skippedExpired = 0;
+  const fresh = ids.filter((id) => {
+    const age = ageMs(id);
+    if (age != null && age >= FOURTEEN_DAYS_MS) {
+      skippedExpired++;
+      return false;
+    }
+    return true;
+  });
+
+  if (fresh.length === 0) {
+    return JSON.stringify({
+      ok: false,
+      error: 'all messages are older than 14 days and cannot be bulk deleted',
+      skipped_expired: skippedExpired,
+    });
+  }
+
   try {
-    await ctx.client.bulkDeleteMessages(input.channel_id, input.message_ids);
-    return JSON.stringify({ ok: true, deleted: input.message_ids.length });
+    if (fresh.length === 1) {
+      // Bulk delete requires 2-100 ids; fall back to a single delete.
+      await ctx.client.deleteMessage(input.channel_id, fresh[0]);
+    } else {
+      await ctx.client.bulkDeleteMessages(input.channel_id, fresh);
+    }
+    return JSON.stringify({ ok: true, deleted: fresh.length, skipped_expired: skippedExpired });
   } catch (err) {
     return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
   }
