@@ -196,8 +196,9 @@ class DiscordClient extends level1 {
     return this._cacheableGet(`/guilds/${guild_id}/members/${user_id}`);
   }
 
-  async editGuildMember(guild_id, user_id, options = {}) {
-    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, options);
+  async editGuildMember(guild_id, user_id, options = {}, reason) {
+    const headers = reason ? { 'X-Audit-Log-Reason': reason } : {};
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, options, headers);
   }
 
   async addMemberRole(guild_id, user_id, role_id) {
@@ -252,18 +253,6 @@ class DiscordClient extends level1 {
 
   async addGuildMember(guild_id, user_id, options = {}) {
     return this.makeRequest('PUT', `/guilds/${guild_id}/members/${user_id}`, options);
-  }
-
-  async modifyGuildMember(guild_id, user_id, options = {}) {
-    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, options);
-  }
-
-  async addRoleToMember(guild_id, user_id, role_id) {
-    return this.makeRequest('PUT', `/guilds/${guild_id}/members/${user_id}/roles/${role_id}`);
-  }
-
-  async removeRoleFromMember(guild_id, user_id, role_id) {
-    return this.makeRequest('DELETE', `/guilds/${guild_id}/members/${user_id}/roles/${role_id}`);
   }
 
   async getGlobalCommands(application_id) {
@@ -479,11 +468,11 @@ class DiscordClient extends level1 {
   }
 
   async moveUser(guild_id, user_id, channel_id) {
-    return this.modifyGuildMember(guild_id, user_id, { channel_id });
+    return this.editGuildMember(guild_id, user_id, { channel_id });
   }
 
   async setUserVoiceState(guild_id, user_id, options = {}) {
-    return this.modifyGuildMember(guild_id, user_id, { mute: options.mute, deaf: options.deaf });
+    return this.editGuildMember(guild_id, user_id, { mute: options.mute, deaf: options.deaf });
   }
 
   async createCategory(guild_id, name) {

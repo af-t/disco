@@ -26,8 +26,8 @@ export async function execute(ctx, input) {
   try {
     const durationMs = Math.min(Math.max(1, input.duration_seconds) * 1000, MAX_TIMEOUT_MS);
     const until = new Date(Date.now() + durationMs).toISOString();
-    await ctx.client.editGuildMember(auth.guildId, input.user_id, { communication_disabled_until: until });
     const reason = `${input.reason ?? 'No reason provided'} (via AI, instructed by ${auth.authorizedBy})`;
+    await ctx.client.editGuildMember(auth.guildId, input.user_id, { communication_disabled_until: until }, reason);
     await recordModeration(ctx.client, {
       guildId: auth.guildId,
       action: 'mute',

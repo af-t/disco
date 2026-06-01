@@ -31,7 +31,9 @@ export function gatedCtx({ perms = permissionFlags.ADMINISTRATOR, bufferIds = ['
 describe('punishment tools', () => {
   it('discord_timeout_member sets communication_disabled_until and files a mute case', async () => {
     const calls = [];
-    const { ctx, map } = gatedCtx({ rest: { editGuildMember: async (g, u, body) => calls.push([g, u, body]) } });
+    const { ctx, map } = gatedCtx({
+      rest: { editGuildMember: async (g, u, body, reason) => calls.push([g, u, body, reason]) },
+    });
     const out = JSON.parse(
       await timeout.execute(ctx, {
         channel_id: 'c1',
@@ -42,6 +44,7 @@ describe('punishment tools', () => {
     );
     assert.equal(out.ok, true);
     assert.ok(calls[0][2].communication_disabled_until);
+    assert.match(calls[0][3], /instructed by a1/);
     assert.equal(map.get('modcase:g1:1').type, 'mute');
     assert.equal(map.get('modcase:g1:1').moderator_id, 'a1');
     assert.equal(map.get('modcase:g1:1').user_id, 'u9');

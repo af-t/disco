@@ -21,14 +21,15 @@ export async function execute(ctx, input) {
   const auth = await authorize(ctx, input, 'DEAFEN_MEMBERS');
   if (!auth.ok) return JSON.stringify(auth);
   try {
-    await ctx.client.editGuildMember(auth.guildId, input.user_id, { deaf: input.deaf });
+    const reason = `via AI, instructed by ${auth.authorizedBy}`;
+    await ctx.client.editGuildMember(auth.guildId, input.user_id, { deaf: input.deaf }, reason);
     await recordModeration(ctx.client, {
       guildId: auth.guildId,
       action: input.deaf ? 'voice_deafen' : 'voice_undeafen',
       caseType: input.deaf ? 'voice_deafen' : 'voice_undeafen',
       userId: input.user_id,
       moderatorId: auth.authorizedBy,
-      reason: `via AI, instructed by ${auth.authorizedBy}`,
+      reason,
     });
     return JSON.stringify({ ok: true });
   } catch (err) {

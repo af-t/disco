@@ -21,14 +21,15 @@ export async function execute(ctx, input) {
   const auth = await authorize(ctx, input, 'MODERATE_MEMBERS');
   if (!auth.ok) return JSON.stringify(auth);
   try {
-    await ctx.client.editGuildMember(auth.guildId, input.user_id, { communication_disabled_until: null });
+    const reason = `${input.reason ?? 'No reason provided'} (via AI, instructed by ${auth.authorizedBy})`;
+    await ctx.client.editGuildMember(auth.guildId, input.user_id, { communication_disabled_until: null }, reason);
     await recordModeration(ctx.client, {
       guildId: auth.guildId,
       action: 'unmute',
       caseType: 'unmute',
       userId: input.user_id,
       moderatorId: auth.authorizedBy,
-      reason: `${input.reason ?? 'No reason provided'} (via AI, instructed by ${auth.authorizedBy})`,
+      reason,
     });
     return JSON.stringify({ ok: true });
   } catch (err) {

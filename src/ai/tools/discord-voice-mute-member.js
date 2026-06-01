@@ -21,14 +21,15 @@ export async function execute(ctx, input) {
   const auth = await authorize(ctx, input, 'MUTE_MEMBERS');
   if (!auth.ok) return JSON.stringify(auth);
   try {
-    await ctx.client.editGuildMember(auth.guildId, input.user_id, { mute: input.mute });
+    const reason = `via AI, instructed by ${auth.authorizedBy}`;
+    await ctx.client.editGuildMember(auth.guildId, input.user_id, { mute: input.mute }, reason);
     await recordModeration(ctx.client, {
       guildId: auth.guildId,
       action: input.mute ? 'voice_mute' : 'voice_unmute',
       caseType: input.mute ? 'voice_mute' : 'voice_unmute',
       userId: input.user_id,
       moderatorId: auth.authorizedBy,
-      reason: `via AI, instructed by ${auth.authorizedBy}`,
+      reason,
     });
     return JSON.stringify({ ok: true });
   } catch (err) {

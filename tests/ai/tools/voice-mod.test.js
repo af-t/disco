@@ -28,14 +28,17 @@ export function gatedCtx({ perms = permissionFlags.ADMINISTRATOR, bufferIds = ['
 }
 
 describe('voice moderation tools', () => {
-  it('discord_voice_mute_member sets mute', async () => {
+  it('discord_voice_mute_member sets mute with an attributed audit reason', async () => {
     const calls = [];
-    const { ctx } = gatedCtx({ rest: { editGuildMember: async (g, u, body) => calls.push([g, u, body]) } });
+    const { ctx } = gatedCtx({
+      rest: { editGuildMember: async (g, u, body, reason) => calls.push([g, u, body, reason]) },
+    });
     const out = JSON.parse(
       await vmute.execute(ctx, { channel_id: 'c1', user_id: 'u9', mute: true, authorizing_message_id: 'm-admin' }),
     );
     assert.equal(out.ok, true);
     assert.deepEqual(calls[0][2], { mute: true });
+    assert.match(calls[0][3], /instructed by a1/);
   });
 
   it('discord_voice_deafen_member sets deaf', async () => {
