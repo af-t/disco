@@ -196,6 +196,18 @@ class DiscordClient extends level1 {
     return this._cacheableGet(`/guilds/${guild_id}/members/${user_id}`);
   }
 
+  async editGuildMember(guild_id, user_id, options = {}) {
+    return this.makeRequest('PATCH', `/guilds/${guild_id}/members/${user_id}`, options);
+  }
+
+  async addMemberRole(guild_id, user_id, role_id) {
+    return this.makeRequest('PUT', `/guilds/${guild_id}/members/${user_id}/roles/${role_id}`);
+  }
+
+  async removeMemberRole(guild_id, user_id, role_id) {
+    return this.makeRequest('DELETE', `/guilds/${guild_id}/members/${user_id}/roles/${role_id}`);
+  }
+
   async getGuildMembers(guild_id, options = {}) {
     const params = new URLSearchParams(options);
     return this._cacheableGet(`/guilds/${guild_id}/members?${params}`);
