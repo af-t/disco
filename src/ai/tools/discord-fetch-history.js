@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 const DEFAULT_LIMIT = 20;
 
 function sanitize(msg) {
@@ -61,6 +62,6 @@ export async function execute({ client, runtime }, { channel_id, before_message_
 
     return JSON.stringify({ ok: true, messages: sanitizedMsgs });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

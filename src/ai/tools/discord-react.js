@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 export const definition = {
   name: 'discord_react',
   description:
@@ -19,6 +20,6 @@ export async function execute({ client }, { channel_id, message_id, emoji }) {
     await client.makeRequest('PUT', `/channels/${channel_id}/messages/${message_id}/reactions/${encoded}/@me`);
     return JSON.stringify({ ok: true });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

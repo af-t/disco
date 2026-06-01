@@ -17,7 +17,7 @@ class DiscordClient extends level1 {
       headers: {
         Authorization: `Bot ${this.token}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'DiscordBot (https://github.com/af-t/disco, 1.2.1)',
+        'User-Agent': 'DiscordBot (https://github.com/af-t/disco, 1.7.0)',
         ...headers,
       },
     };

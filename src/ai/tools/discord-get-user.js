@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 function sanitizeUser(u) {
   if (!u) return null;
   return { id: u.id, username: u.username, global_name: u.global_name, bot: !!u.bot, avatar: u.avatar };
@@ -35,6 +36,6 @@ export async function execute({ client }, { user_id, guild_id }) {
     }
     return JSON.stringify(out);
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

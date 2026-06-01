@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 import permissionFlags from '../../lib/permission.js';
 import utility from '../../lib/utility.js';
 
@@ -48,7 +49,7 @@ export async function authorize(
       return { ok: false, error: 'authorizing message must be from a non-bot user' };
     }
   } catch (err) {
-    return { ok: false, error: `cannot fetch authorizing message: ${String(err?.message ?? err)}` };
+    return { ok: false, error: `cannot fetch authorizing message: ${formatToolError(err)}` };
   }
 
   let perms;
@@ -56,7 +57,7 @@ export async function authorize(
     const member = await client.getGuildMember(guildId, authorId);
     perms = await utility.getPermissions(client, guildId, member);
   } catch (err) {
-    return { ok: false, error: `cannot resolve permissions: ${String(err?.message ?? err)}` };
+    return { ok: false, error: `cannot resolve permissions: ${formatToolError(err)}` };
   }
 
   const authorized = (perms & ADMIN) === ADMIN || (perms & flag) === flag;

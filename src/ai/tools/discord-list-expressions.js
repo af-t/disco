@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 const MAX = 100;
 
 export const definition = {
@@ -23,6 +24,6 @@ export async function execute({ client }, { guild_id }) {
       stickers: (stickers ?? []).slice(0, MAX).map((s) => ({ id: s.id, name: s.name })),
     });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

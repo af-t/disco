@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 export const definition = {
   name: 'discord_send_media',
   description:
@@ -19,6 +20,6 @@ export async function execute({ client, runtime }, { channel_id, url, content })
     runtime.onBotMessage(sent);
     return JSON.stringify({ ok: true, message_id: sent.id });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

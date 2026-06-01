@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 import permissionFlags from '../../lib/permission.js';
 
 function namedPermissions(permsStr) {
@@ -47,6 +48,6 @@ export async function execute({ client }, { guild_id, role_id }) {
       },
     });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

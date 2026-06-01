@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 import { authorize } from './authorize.js';
 import { recordModeration } from './mod-record.js';
 
@@ -33,6 +34,6 @@ export async function execute(ctx, input) {
     });
     return JSON.stringify({ ok: true });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

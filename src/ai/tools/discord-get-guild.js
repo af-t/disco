@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 const MAX_CHANNELS = 50;
 
 export const definition = {
@@ -32,6 +33,6 @@ export async function execute({ client }, { guild_id }) {
       },
     });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

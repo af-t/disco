@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 export const definition = {
   name: 'discord_get_thread',
   description:
@@ -28,6 +29,6 @@ export async function execute({ client }, { thread_id }) {
       },
     });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

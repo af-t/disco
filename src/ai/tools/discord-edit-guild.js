@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 import { authorize } from './authorize.js';
 
 export const definition = {
@@ -22,6 +23,6 @@ export async function execute(ctx, input) {
     await ctx.client.modifyGuild(auth.guildId, input.options ?? {});
     return JSON.stringify({ ok: true });
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }

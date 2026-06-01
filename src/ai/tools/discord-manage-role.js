@@ -1,3 +1,4 @@
+import { formatToolError } from './error.js';
 import { authorize } from './authorize.js';
 
 export const definition = {
@@ -52,6 +53,6 @@ export async function execute(ctx, input) {
         return JSON.stringify({ ok: false, error: `unknown action ${input.action}` });
     }
   } catch (err) {
-    return JSON.stringify({ ok: false, error: String(err?.message ?? err) });
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
   }
 }
