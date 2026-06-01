@@ -847,3 +847,158 @@ describe('interaction_create extra coverage', () => {
     assert.ok(errors.length > 0);
   });
 });
+
+describe('interaction_create auto-defer', () => {
+  afterEach(() => {
+    mock.timers.reset();
+    mock.restoreAll();
+  });
+
+  it('auto-defers a slow command so a late reply still lands', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const responses = [];
+    const edits = [];
+
+    const client = createMockClient({
+      commands: {
+        slow: {
+          data: { name: 'slow', description: 'x' },
+          permissions: [],
+          execute: async (_c, msg) => {
+            // cross Discord's 3s window before responding
+            mock.timers.tick(2500);
+            await Promise.resolve();
+            await Promise.resolve();
+            await msg.reply('done');
+          },
+        },
+      },
+    });
+    client.createInteractionResponse = async (_id, _tok, body) => {
+      responses.push(body);
+      return {};
+    };
+    client.editOriginalInteractionResponse = async (_app, _tok, body) => {
+      edits.push(body);
+      return {};
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'slow', options: [] } }));
+
+    assert.ok(
+      responses.some((r) => r.type === 5),
+      'should send a deferred (type 5) response before the deadline',
+    );
+    assert.ok(
+      edits.some((e) => e.content === 'done'),
+      'the late reply should edit the original deferred response',
+    );
+    assert.ok(!responses.some((r) => r.type === 4), 'must not attempt an immediate type 4 response after deferring');
+  });
+
+  it('replies immediately and never auto-defers a fast command', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const responses = [];
+
+    const client = createMockClient({
+      commands: {
+        fast: {
+          data: { name: 'fast', description: 'x' },
+          permissions: [],
+          execute: async (_c, msg) => {
+            await msg.reply('hi');
+          },
+        },
+      },
+    });
+    client.createInteractionResponse = async (_id, _tok, body) => {
+      responses.push(body);
+      return {};
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'fast', options: [] } }));
+    // the auto-defer timer must already be cleared
+    mock.timers.tick(5000);
+    await Promise.resolve();
+
+    assert.ok(responses.some((r) => r.type === 4 && r.data?.content === 'hi'));
+    assert.ok(!responses.some((r) => r.type === 5), 'fast command must not auto-defer');
+  });
+
+  it('reports an error via editOriginal when a command throws after auto-defer', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const responses = [];
+    const edits = [];
+
+    const client = createMockClient({
+      commands: {
+        slowboom: {
+          data: { name: 'slowboom', description: 'x' },
+          permissions: [],
+          execute: async () => {
+            // cross the deadline, then fail without replying
+            mock.timers.tick(2000);
+            await Promise.resolve();
+            await Promise.resolve();
+            throw new Error('kaboom');
+          },
+        },
+      },
+    });
+    client.createInteractionResponse = async (_id, _tok, body) => {
+      responses.push(body);
+      return {};
+    };
+    client.editOriginalInteractionResponse = async (_app, _tok, body) => {
+      edits.push(body);
+      return {};
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'slowboom', options: [] } }));
+
+    assert.ok(
+      responses.some((r) => r.type === 5),
+      'the slow command should have auto-deferred',
+    );
+    assert.ok(
+      edits.some((e) => typeof e.content === 'string' && e.content.includes('error')),
+      'the error must be delivered by editing the deferred response',
+    );
+    assert.ok(!responses.some((r) => r.type === 4), 'must not send an immediate error after deferring');
+  });
+
+  it('falls back to an error response when reply itself fails before deferring', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const responses = [];
+    let firstCall = true;
+
+    const client = createMockClient({
+      commands: {
+        replyfail: {
+          data: { name: 'replyfail', description: 'x' },
+          permissions: [],
+          execute: async (_c, msg) => {
+            await msg.reply('result'); // this send fails below
+          },
+        },
+      },
+    });
+    client.createInteractionResponse = async (_id, _tok, body) => {
+      responses.push(body);
+      // first type 4 (the real reply) fails, the fallback error is the second
+      if (firstCall) {
+        firstCall = false;
+        throw new Error('send failed');
+      }
+      return {};
+    };
+
+    await handleInteraction(client, createMockInteraction({ data: { name: 'replyfail', options: [] } }));
+
+    assert.strictEqual(responses.length, 2, 'a failed reply should trigger one fallback error response');
+    assert.ok(
+      responses[1].type === 4 && responses[1].data?.content?.includes('error'),
+      'the fallback must carry the error message',
+    );
+  });
+});

@@ -1,6 +1,6 @@
 {
   "name": "disco",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Discord bot application.",
   "main": "src/index.js",
   "type": "module",

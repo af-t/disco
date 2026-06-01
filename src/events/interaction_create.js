@@ -12,6 +12,9 @@ const RATE_LIMIT = {
 
 const HEAVY_COMMANDS = new Set(['ai', 'openrouter', 'chat', 'summarize', 'summary', 'recap']);
 
+// fire before Discord's 3s deadline; lower this on high-latency hosts
+const AUTO_DEFER_MS = Number(process.env.DISCORD_AUTODEFER_MS) || 2000;
+
 export default async (client, interaction) => {
   // Autocomplete handling (type 4)
   if (interaction.type === 4) {
@@ -138,37 +141,74 @@ export default async (client, interaction) => {
     interactionId: interaction.id,
   };
 
-  // reply shim handles immediate and deferred paths
+  // interaction response state shared by the shims below
   let deferred = false;
-  mockMessage.reply = async (content, options = {}) => {
-    const payload = typeof content === 'string' ? { content } : content;
-    const method = deferred
-      ? () =>
-          client.editOriginalInteractionResponse(client._session.application.id, interaction.token, {
-            ...payload,
-            ...options,
-          })
-      : () =>
-          client.createInteractionResponse(interaction.id, interaction.token, {
-            type: 4,
-            data: { ...payload, ...options, flags: options.flags ?? 64 },
-          });
+  let replied = false;
+  let deferralPromise = null;
+  let autoDeferTimer = null;
 
-    if (deferred) {
-      return method();
+  const clearAutoDefer = () => {
+    if (autoDeferTimer) {
+      clearTimeout(autoDeferTimer);
+      autoDeferTimer = null;
     }
-    return method();
+  };
+
+  // idempotent defer, so reply and the timer cannot race
+  const ensureDeferred = (ephemeral = true) => {
+    if (!deferralPromise) {
+      deferralPromise = client
+        .createInteractionResponse(interaction.id, interaction.token, {
+          type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+          data: ephemeral ? { flags: 64 } : undefined,
+        })
+        .then(() => {
+          // only the confirmed flag decides the reply path
+          deferred = true;
+        });
+    }
+    return deferralPromise;
+  };
+
+  // reply shim handles immediate and deferred paths
+  mockMessage.reply = async (content, options = {}) => {
+    clearAutoDefer();
+    const payload = typeof content === 'string' ? { content } : content;
+    // let any in-flight defer settle before choosing a path
+    if (deferralPromise) {
+      await deferralPromise.catch(() => {});
+    }
+    // a successful defer means we edit the original response
+    if (deferred) {
+      const res = await client.editOriginalInteractionResponse(client._session.application.id, interaction.token, {
+        ...payload,
+        ...options,
+      });
+      // mark replied only once a response truly landed
+      replied = true;
+      return res;
+    }
+    const res = await client.createInteractionResponse(interaction.id, interaction.token, {
+      type: 4,
+      data: { ...payload, ...options, flags: options.flags ?? 64 },
+    });
+    replied = true;
+    return res;
   };
 
   // Support deferred responses for slow commands (fixes M5)
   mockMessage.defer = async (ephemeral = true) => {
-    await client.createInteractionResponse(interaction.id, interaction.token, {
-      type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
-      data: ephemeral ? { flags: 64 } : undefined,
-    });
-    // only mark deferred after the API call succeeds
-    deferred = true;
+    clearAutoDefer();
+    await ensureDeferred(ephemeral);
   };
+
+  // Discord invalidates the token after 3s; defer just before then
+  // so slow commands still answer instead of failing outright
+  autoDeferTimer = setTimeout(() => {
+    autoDeferTimer = null;
+    if (replied) return;
+    ensureDeferred().catch((err) => client.logger.warn(`Auto-defer failed for ${name}:`, err));
+  }, AUTO_DEFER_MS);
 
   // Helper to parse interaction options into args array
   const parseOptions = (opts) => {
@@ -190,24 +230,29 @@ export default async (client, interaction) => {
   try {
     await cmd(client, mockMessage, args, rawArgs);
   } catch (error) {
+    clearAutoDefer();
     client.logger.error(`Error executing slash command ${name}:`, error);
-    if (deferred) {
-      try {
+    // a successful reply already reached the user, leave it alone
+    if (replied) return;
+    if (deferralPromise) {
+      await deferralPromise.catch(() => {});
+    }
+    const errorContent = '❌ An unexpected error occurred while executing this command.';
+    try {
+      if (deferred) {
         await client.editOriginalInteractionResponse(client._session.application.id, interaction.token, {
-          content: '❌ An unexpected error occurred while executing this command.',
+          content: errorContent,
         });
-      } catch {
-        // interaction may have expired
-      }
-    } else {
-      try {
+      } else {
         await client.createInteractionResponse(interaction.id, interaction.token, {
           type: 4,
-          data: { content: '❌ An unexpected error occurred while executing this command.', flags: 64 },
+          data: { content: errorContent, flags: 64 },
         });
-      } catch {
-        // ignore
       }
+    } catch {
+      // interaction may have expired or already been answered
     }
+  } finally {
+    clearAutoDefer();
   }
 };

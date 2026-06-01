@@ -9,11 +9,7 @@ const execute = async (client, message, args, _rawArgs) => {
     if (limit < 10) limit = 10;
   }
 
-  // Defer interaction for slash command compatibility (ephemeral by default)
-  if (message.isInteraction && typeof message.defer === 'function') {
-    await message.defer(true).catch((err) => client.logger?.warn?.('Failed to defer interaction:', err));
-  }
-
+  // slash interactions auto-defer past Discord's 3s deadline
   let typing = true;
   const sendTyping = async () => {
     while (typing) {
