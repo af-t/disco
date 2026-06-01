@@ -58,6 +58,7 @@ function newChannelState() {
     cooldownUntil: 0,
     lastBotMsgAt: 0,
     channelName: null,
+    authorizableIds: new Set(),
   };
 }
 
@@ -261,6 +262,8 @@ export class ChannelAIRuntime {
       const channelName = s.channelName ?? msg.channel_id;
       const block = renderEventBlock(snap, { channel_name: channelName, channel_id: msg.channel_id });
       for (const observed of s.rollingBuffer) observed.flag = 'observed';
+      // Only this fresh message may authorize a gated action now.
+      s.authorizableIds = new Set([snap.id]);
       s.pendingMsgs = s.pendingMsgs.filter((m) => m !== snap);
       this._dispatch(channelKey, msg.channel_id, msg.guild_id ?? null, block).catch((err) =>
         this.client.logger?.error?.('AI steer dispatch error', err),
@@ -322,6 +325,8 @@ export class ChannelAIRuntime {
       for (const snap of s.rollingBuffer) {
         if (activeMsgs.includes(snap)) snap.flag = 'observed';
       }
+      // Only this turn's new messages may authorize a gated action.
+      s.authorizableIds = new Set(activeMsgs.map((m) => m.id));
       s.pendingMsgs = s.pendingMsgs.filter((m) => !activeMsgs.includes(m));
 
       await this._dispatch(channelKey, channelId, guildId, content);
@@ -386,6 +391,9 @@ export class ChannelAIRuntime {
 
   async invoke({ mode, msg, explicitPrompt }) {
     if (mode !== 'command') throw new Error(`Unknown invoke mode: ${mode}`);
+
+    // The command message is the trigger that may authorize gated actions.
+    this._state(msg.channel_id).authorizableIds = new Set([msg.id]);
 
     const guildPart = msg.guild_id ?? 'dm';
     const userId = msg.author?.id ?? 'unknown';

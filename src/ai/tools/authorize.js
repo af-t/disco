@@ -4,12 +4,24 @@ import utility from '../../lib/utility.js';
 const ADMIN = permissionFlags.ADMINISTRATOR;
 
 // Parent-side gate: an action only proceeds if a real admin instructed it.
-export async function authorize({ client, runtime }, { channel_id, authorizing_message_id }, requiredPermission) {
+export async function authorize(
+  { client, runtime, agentKey },
+  { channel_id, authorizing_message_id },
+  requiredPermission,
+) {
   if (!channel_id || !authorizing_message_id) {
     return { ok: false, error: 'channel_id and authorizing_message_id are required' };
   }
   const flag = permissionFlags[requiredPermission];
   if (flag == null) return { ok: false, error: `unknown permission ${requiredPermission}` };
+
+  // A channel agent may only act on the channel it is running for.
+  if (typeof agentKey === 'string' && agentKey.startsWith('channel:')) {
+    const activeChannelId = agentKey.slice('channel:'.length);
+    if (activeChannelId !== channel_id) {
+      return { ok: false, error: 'cannot act on a channel outside this conversation' };
+    }
+  }
 
   let guildId = null;
   try {
@@ -19,11 +31,13 @@ export async function authorize({ client, runtime }, { channel_id, authorizing_m
   if (!guildId) guildId = runtime?._agentGuild?.get?.(`channel:${channel_id}`) ?? null;
   if (!guildId) return { ok: false, error: 'this action is only available in a guild' };
 
-  // Bind the action to an instruction actually in the current context.
+  // Only a message that triggered the current turn can authorize, not any
+  // older admin chatter still sitting in the rolling context buffer.
   const state = runtime?.channels?.get?.(channel_id);
-  const inContext = state?.rollingBuffer?.some?.((s) => s.id === authorizing_message_id);
-  if (!inContext) {
-    return { ok: false, error: 'authorizing_message_id is not a recent message in this channel' };
+  const triggers = state?.authorizableIds;
+  const inTurn = typeof triggers?.has === 'function' && triggers.has(authorizing_message_id);
+  if (!inTurn) {
+    return { ok: false, error: 'authorizing_message_id is not the instruction that triggered this turn' };
   }
 
   let authorId;

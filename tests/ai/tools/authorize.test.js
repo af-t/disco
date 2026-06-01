@@ -7,10 +7,11 @@ afterEach(() => mock.restoreAll());
 
 function makeCtx({
   guildId = 'g1',
-  bufferIds = ['m-admin'],
+  triggerIds = ['m-admin'],
   author = { id: 'u-admin', bot: false },
   perms = permissionFlags.MANAGE_MESSAGES,
   roleId = 'role1',
+  agentKey,
 } = {}) {
   const client = {
     getChannel: async () => ({ guild_id: guildId }),
@@ -23,9 +24,9 @@ function makeCtx({
   };
   const runtime = {
     _agentGuild: new Map(),
-    channels: new Map([['c1', { rollingBuffer: bufferIds.map((id) => ({ id })) }]]),
+    channels: new Map([['c1', { authorizableIds: new Set(triggerIds) }]]),
   };
-  return { client, runtime };
+  return { client, runtime, agentKey };
 }
 
 describe('authorize', () => {
@@ -48,11 +49,24 @@ describe('authorize', () => {
     assert.match(res.error, /lacks MANAGE_MESSAGES/);
   });
 
-  it('rejects when the authorizing message is not in the channel buffer', async () => {
-    const ctx = makeCtx({ bufferIds: ['other'] });
+  it('rejects a message that did not trigger the current turn', async () => {
+    const ctx = makeCtx({ triggerIds: ['other'] });
     const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
     assert.equal(res.ok, false);
-    assert.match(res.error, /not a recent message/);
+    assert.match(res.error, /trigger/);
+  });
+
+  it('rejects a channel agent acting on a different channel', async () => {
+    const ctx = makeCtx({ agentKey: 'channel:cOther' });
+    const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
+    assert.equal(res.ok, false);
+    assert.match(res.error, /outside this conversation/);
+  });
+
+  it('allows a channel agent acting on its own channel', async () => {
+    const ctx = makeCtx({ agentKey: 'channel:c1' });
+    const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
+    assert.equal(res.ok, true);
   });
 
   it('rejects in a DM (no guild)', async () => {

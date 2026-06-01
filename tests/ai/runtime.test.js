@@ -316,6 +316,41 @@ describe('ChannelAIRuntime with the agent pool', () => {
     assert.doesNotMatch(pool.runs[0].content, /first message/);
   });
 
+  it('marks the dispatched message id as authorizable after an idle flush', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const rt = new ChannelAIRuntime({
+      client: stubClient(),
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+    await rt.onMessage(msg({ id: 'm1', content: 'ban that user please' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+    assert.ok(rt._state('c1').authorizableIds.has('m1'));
+  });
+
+  it('replaces authorizable ids with the new message when steering a running child', async () => {
+    const pool = stubPool();
+    pool.running.add('channel:c1');
+    const rt = new ChannelAIRuntime({
+      client: stubClient(),
+      pool,
+      config: { debounceMs: 9999, forceDebounceMs: 9999, dailyLimit: 1000 },
+    });
+    rt._state('c1').authorizableIds = new Set(['old']);
+    await rt.onMessage(msg({ id: 'm2', content: 'mid-run instruction' }));
+    assert.ok(rt._state('c1').authorizableIds.has('m2'));
+    assert.ok(!rt._state('c1').authorizableIds.has('old'));
+  });
+
+  it('marks the command message id as authorizable in command mode', async () => {
+    const pool = stubPool();
+    const rt = new ChannelAIRuntime({ client: stubClient(), pool, config: { dailyLimit: 1000 } });
+    await rt.invoke({ mode: 'command', msg: msg({ id: 'm1' }), explicitPrompt: 'ban that user' });
+    assert.ok(rt._state('c1').authorizableIds.has('m1'));
+  });
+
   it('automatically fetches replied-to message attachments and sends them inline', async () => {
     mock.timers.enable({ apis: ['setTimeout'] });
     const pool = stubPool();

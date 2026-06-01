@@ -22,7 +22,7 @@ export function gatedCtx({ perms = permissionFlags.ADMINISTRATOR, bufferIds = ['
   };
   const runtime = {
     _agentGuild: new Map(),
-    channels: new Map([['c1', { rollingBuffer: bufferIds.map((id) => ({ id })) }]]),
+    channels: new Map([['c1', { authorizableIds: new Set(bufferIds) }]]),
   };
   return { ctx: { client, runtime }, map };
 }

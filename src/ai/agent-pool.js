@@ -79,7 +79,8 @@ export class ChildHandle {
       return;
     }
     try {
-      const result = await exec(this.ctx, input ?? {});
+      // agentKey lets gated tools bind an action to this child's channel.
+      const result = await exec({ ...this.ctx, agentKey: this.agentKey }, input ?? {});
       this._send({ t: MSG.TOOL_RESULT, id, ok: true, result });
     } catch (err) {
       this._send({ t: MSG.TOOL_RESULT, id, ok: false, error: String(err?.message ?? err) });

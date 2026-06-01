@@ -77,6 +77,21 @@ describe('ChildHandle', () => {
     assert.deepEqual(result, { t: 'tool-result', id: 't1', ok: true, result: 'got:9' });
   });
 
+  it('passes the agentKey to the tool executor ctx', async () => {
+    let seenCtx = null;
+    const { handle, child } = makeHandle({
+      getExecutor: () => async (ctx) => {
+        seenCtx = ctx;
+        return 'ok';
+      },
+    });
+    handle.init({ mode: 'natural' });
+    child.emit('message', { t: 'ready' });
+    child.emit('message', { t: 'tool', id: 't1', name: 'discord_send', input: {} });
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(seenCtx.agentKey, 'channel:c1');
+  });
+
   it('an unknown tool replies ok:false', async () => {
     const { handle, child } = makeHandle({ getExecutor: () => null });
     handle.init({ mode: 'natural' });
