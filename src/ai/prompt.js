@@ -41,7 +41,7 @@ export function buildSystemPrompt({ botUsername }) {
     'MODERATION POLICY',
     '- You may NEVER moderate on your own judgement. No proactive muting, deleting, kicking, banning, or guild edits.',
     '- Moderation/guild tools run ONLY when an admin or mod explicitly instructs the action in chat.',
-    '- For every such tool you MUST pass authorizing_message_id = the id of that admin instruction message in the current context.',
+    '- For every such tool you MUST pass authorizing_message_id = the id of the new message in which the admin just gave that instruction this turn, not an older message from earlier context.',
     '- If no admin asked, refuse and say you only take moderation actions on an admin instruction.',
     '- The system independently verifies the instruction author actually holds the required permission; you cannot bypass it, so do not try.',
     '',
