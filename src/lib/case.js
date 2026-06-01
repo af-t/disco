@@ -1,35 +1,39 @@
+// Serializes counter increments per guild so concurrent cases never
+// collide: the verify-loop could not detect two writers landing on the
+// same incremented value, silently overwriting one record.
+const caseQueues = new Map();
+
 export async function createCase(client, guildId, type, userId, moderatorId, reason = '', duration = null) {
-  const counterKey = `modcase:${guildId}:counter`;
-
-  // Optimistic retry-loop: read → increment in memory → write → verify
-  // Prevents race condition when two calls interleave get+set (fixes B1)
-  let counter;
-  while (true) {
-    counter = (await client.store.get(counterKey)) || 0;
-    counter++;
+  const run = (caseQueues.get(guildId) ?? Promise.resolve()).then(async () => {
+    const counterKey = `modcase:${guildId}:counter`;
+    const counter = ((await client.store.get(counterKey)) || 0) + 1;
     await client.store.set(counterKey, counter);
-    // Verify no concurrent write sneaked in
-    const verify = await client.store.get(counterKey);
-    if (verify === counter) break;
-  }
 
-  const caseData = {
-    id: counter,
-    type,
-    user_id: userId,
-    moderator_id: moderatorId,
-    reason: reason.trim() || 'No reason provided',
-    created_at: Date.now(),
-    resolved: false,
-    resolved_at: null,
-  };
+    const caseData = {
+      id: counter,
+      type,
+      user_id: userId,
+      moderator_id: moderatorId,
+      reason: reason.trim() || 'No reason provided',
+      created_at: Date.now(),
+      resolved: false,
+      resolved_at: null,
+    };
 
-  if (duration !== null) {
-    caseData.duration = duration;
-  }
+    if (duration !== null) {
+      caseData.duration = duration;
+    }
 
-  await client.store.set(`modcase:${guildId}:${counter}`, caseData);
-  return counter;
+    await client.store.set(`modcase:${guildId}:${counter}`, caseData);
+    return counter;
+  });
+
+  // A rejected case must not wedge the guild's queue for later calls.
+  caseQueues.set(
+    guildId,
+    run.catch(() => {}),
+  );
+  return run;
 }
 
 export async function resolveCase(client, guildId, caseId) {
