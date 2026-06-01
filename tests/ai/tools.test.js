@@ -5,8 +5,8 @@ import { TOOL_DEFINITIONS, getExecutor, buildProxyTools, ACTION_TOOL_NAMES } fro
 afterEach(() => mock.restoreAll());
 
 describe('tools registry', () => {
-  it('exposes a definition for all 10 Discord tools', () => {
-    assert.equal(TOOL_DEFINITIONS.length, 10);
+  it('exposes a definition for all 26 Discord tools', () => {
+    assert.equal(TOOL_DEFINITIONS.length, 26);
     for (const def of TOOL_DEFINITIONS) {
       assert.equal(typeof def.name, 'string');
       assert.equal(typeof def.description, 'string');
@@ -46,7 +46,7 @@ describe('tools registry', () => {
       return Promise.resolve('rpc-result');
     };
     const proxies = buildProxyTools(rpc);
-    assert.equal(proxies.length, 10);
+    assert.equal(proxies.length, 26);
     const reply = proxies.find((t) => t.name === 'discord_reply');
     const result = await reply.execute({ channel_id: 'c1', message_id: 'm1', content: 'yo' });
     assert.equal(result, 'rpc-result');
