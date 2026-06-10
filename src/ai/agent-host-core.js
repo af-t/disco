@@ -1,6 +1,16 @@
+import path from 'node:path';
 import { MSG } from './ipc.js';
 import { shouldCompact, compact } from './compactor.js';
 import { ACTION_TOOL_NAMES } from './tools/index.js';
+
+// Memory lives at the spawner-provided dir (scoped per guild/user, surviving
+// workspace cleanup); tmp stays workspace-local so it dies with the channel.
+export function resolveStoragePaths(cfg, cwd) {
+  return {
+    tmpDir: path.join(cwd, '.agent', 'tmp'),
+    memoryDir: cfg?.memoryDir || path.join(cwd, '.agent', 'memory'),
+  };
+}
 
 // A run finished naturally only if the last message is assistant text
 // with no pending tool calls. Anything else means the loop was cut short.

@@ -1,9 +1,8 @@
 import '../dns-override.js';
-import path from 'node:path';
 import createAgent from 'openrouter';
 import { MSG } from './ipc.js';
 import { buildProxyTools } from './tools/index.js';
-import { createHost } from './agent-host-core.js';
+import { createHost, resolveStoragePaths } from './agent-host-core.js';
 
 const send = (m) => process.send?.(m);
 
@@ -28,10 +27,7 @@ async function onInit(cfg) {
   const agent = await createAgent({
     maxTurns: cfg.maxTurns,
     systemPrompt: cfg.systemPrompt,
-    storagePaths: {
-      tmpDir: path.join(cwd, '.agent', 'tmp'),
-      memoryDir: path.join(cwd, '.agent', 'memory'),
-    },
+    storagePaths: resolveStoragePaths(cfg, cwd),
   });
   if (Array.isArray(cfg.history)) agent.messages = cfg.history;
 

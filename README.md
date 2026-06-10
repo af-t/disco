@@ -64,8 +64,9 @@ A modular and extendable Discord bot built with Node.js, designed for server man
    | `STORE_DATA_PATH`     | No       | `./storage/db`                   | Server-side disk path for the store database |
    | `OPENROUTER_ORDER`    | No       | —                                | Comma-separated provider priority order |
    | `OPENROUTER_ONLY`     | No       | —                                | Restrict inference to specific providers only |
-   | `OPENROUTER_MAX_TOKENS` | No     | model default                    | Max output tokens per agent turn |
+   | `OPENROUTER_MAX_COMPLETION_TOKENS` | No | model default              | Max output tokens per agent turn |
    | `OPENROUTER_MAX_TURNS`| No       | `120`                            | Per-loop turn cap for pooled agent processes |
+   | `OPENROUTER_EMBEDDING_MODEL` | No | `openai/text-embedding-3-small` | Embedding model for semantic memory recall |
    | `AI_MAX_AGENTS`       | No       | `16`                             | Max concurrent forked agent child processes |
    | `AI_AGENT_IDLE_MS`    | No       | `300000`                         | Evict an idle agent child after this many ms |
    | `AI_AGENT_RESPAWN_COOLDOWN_MS` | No | `30000`                       | Cooldown per agent key after a startup crash before respawn |
@@ -107,6 +108,7 @@ When `AI_NATURAL_MODE=1`, the bot acts as a normal channel member: it observes e
 - `.ai-mute on | off | status` — admins with `MANAGE_CHANNELS` can silence the bot in a specific channel.
 - `.ai` / `.openrouter` / `.chat` — direct invocation; the bot is forced to respond and keeps per-user history (`session:openrouter:{guild}:{user}`, 2h TTL).
 - Image attachments are sent inline as multimodal blocks; non-image attachments are saved under `workspaces/channel-{id}/` or `workspaces/command-{guild}-{user}/` and exposed to the LLM via the built-in `Read` tool. Workspace directories are cleaned up automatically when the matching store key expires.
+- Persistent memory is scoped per guild (`workspaces/memory/guild-{id}`, shared by all channels in the guild; DMs use `dm-{channel}`, `.ai` sessions use `command-{guild}-{user}`) and survives workspace cleanup. The agent recalls memories semantically via the SDK's `RecallMemory` tool — embeddings-ranked when the OpenRouter API is reachable (model set by `OPENROUTER_EMBEDDING_MODEL`), with a lexical fallback otherwise.
 
 When `AI_NATURAL_MODE=0` (default), the `.ai` / `.openrouter` / `.chat` commands return a disabled message — there is no parallel legacy path.
 

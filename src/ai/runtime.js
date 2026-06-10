@@ -340,6 +340,12 @@ export class ChannelAIRuntime {
     }
   }
 
+  // Memory is scoped wider than the workspace (guild, not channel) and lives
+  // outside the per-channel dirs so buffer/session cleanup does not erase it.
+  _memoryDir(scope) {
+    return path.join(this.workspaceRoot, 'memory', scope);
+  }
+
   async _dispatch(channelKey, channelId, guildId, content) {
     if (guildId) this._agentGuild.set(channelKey, guildId);
     const spawnContext = {
@@ -349,6 +355,7 @@ export class ChannelAIRuntime {
       compactThreshold: this.config.compactThreshold,
       keepTail: this.config.keepTail,
       workspaceDir: path.join(this.workspaceRoot, `channel-${channelId}`),
+      memoryDir: this._memoryDir(guildId ? `guild-${guildId}` : `dm-${channelId}`),
       history: null,
     };
     const done = await this.pool.run(channelKey, content, spawnContext);
@@ -438,6 +445,7 @@ export class ChannelAIRuntime {
       compactThreshold: this.config.compactThreshold,
       keepTail: this.config.keepTail,
       workspaceDir: cmdWorkspaceDir,
+      memoryDir: this._memoryDir(`command-${guildPart}-${userId}`),
       history,
     };
 

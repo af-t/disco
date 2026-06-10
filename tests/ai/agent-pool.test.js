@@ -170,6 +170,32 @@ describe('AgentPool', () => {
     pool.shutdown();
   });
 
+  it('forwards memoryDir to the child init and creates the directory', async () => {
+    const children = [];
+    const pool = new AgentPool({ ctx: poolCtx(), logger: null, forkFn: fakeForkFactory(children), maintainMs: 100000 });
+    const ws = await tmpWorkspace();
+    const memoryDir = path.join(ws, 'memory', 'guild-g1');
+    pool.run('channel:c1', 'hello', { mode: 'natural', workspaceDir: path.join(ws, 'channel-c1'), memoryDir });
+    await waitFor(() => children.length > 0);
+    children[0].emit('message', { t: 'ready' });
+    await waitFor(() => children[0].sent.some((m) => m.t === 'init'));
+    const init = children[0].sent.find((m) => m.t === 'init');
+    assert.equal(init.memoryDir, memoryDir);
+    assert.ok((await fsp.stat(memoryDir)).isDirectory());
+    pool.shutdown();
+  });
+
+  it('passes OPENROUTER_EMBEDDING_MODEL through to the child env', async () => {
+    process.env.OPENROUTER_EMBEDDING_MODEL = 'test/embedding-model';
+    try {
+      const pool = new AgentPool({ ctx: poolCtx(), logger: null, forkFn: fakeForkFactory([]), maintainMs: 100000 });
+      assert.equal(pool._childEnv().OPENROUTER_EMBEDDING_MODEL, 'test/embedding-model');
+      pool.shutdown();
+    } finally {
+      delete process.env.OPENROUTER_EMBEDDING_MODEL;
+    }
+  });
+
   it('reuses an existing child for the same agentKey', async () => {
     const children = [];
     const pool = new AgentPool({ ctx: poolCtx(), logger: null, forkFn: fakeForkFactory(children), maintainMs: 100000 });

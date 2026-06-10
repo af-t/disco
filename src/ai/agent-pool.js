@@ -140,7 +140,8 @@ const HOST_PATH = new URL('./agent-host.js', import.meta.url).pathname;
 const CHILD_ENV_KEYS = [
   'OPENROUTER_API_KEY',
   'OPENROUTER_MODEL',
-  'OPENROUTER_MAX_TOKENS',
+  'OPENROUTER_MAX_COMPLETION_TOKENS',
+  'OPENROUTER_EMBEDDING_MODEL',
   'OPENROUTER_ORDER',
   'OPENROUTER_ONLY',
   'TAVILY_API_KEY',
@@ -225,6 +226,7 @@ export class AgentPool {
     }
     try {
       await fs.mkdir(spawnContext.workspaceDir, { recursive: true });
+      if (spawnContext.memoryDir) await fs.mkdir(spawnContext.memoryDir, { recursive: true });
     } catch (err) {
       this.logger?.warn?.(`agent ${agentKey} workspace mkdir failed`, err);
       return null;
@@ -250,6 +252,7 @@ export class AgentPool {
         maxTurns: spawnContext.maxTurns,
         compactThreshold: spawnContext.compactThreshold,
         keepTail: spawnContext.keepTail,
+        memoryDir: spawnContext.memoryDir ?? null,
         history: spawnContext.history ?? null,
       });
     } catch (err) {

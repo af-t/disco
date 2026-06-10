@@ -1,6 +1,7 @@
 import { describe, it, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { createHost } from '../../src/ai/agent-host-core.js';
+import path from 'node:path';
+import { createHost, resolveStoragePaths } from '../../src/ai/agent-host-core.js';
 
 afterEach(() => mock.restoreAll());
 
@@ -194,5 +195,21 @@ describe('agent host core', () => {
     const done = sent.find((m) => m.t === 'done');
     assert.equal(done.outcome, 'finished');
     assert.equal(done.actionToolCalled, true);
+  });
+});
+
+describe('resolveStoragePaths', () => {
+  it('uses the configured memoryDir when provided', () => {
+    const sp = resolveStoragePaths({ memoryDir: '/data/memory/guild-g1' }, '/work/channel-c1');
+    assert.deepEqual(sp, {
+      tmpDir: path.join('/work/channel-c1', '.agent', 'tmp'),
+      memoryDir: '/data/memory/guild-g1',
+    });
+  });
+
+  it('falls back to the workspace-local memory dir', () => {
+    const sp = resolveStoragePaths({}, '/work/channel-c1');
+    assert.equal(sp.memoryDir, path.join('/work/channel-c1', '.agent', 'memory'));
+    assert.equal(sp.tmpDir, path.join('/work/channel-c1', '.agent', 'tmp'));
   });
 });

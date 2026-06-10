@@ -1,6 +1,6 @@
 {
   "name": "disco",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Discord bot application.",
   "main": "src/index.js",
   "type": "module",
@@ -42,7 +42,7 @@
     "node": ">=22.3.0"
   },
   "dependencies": {
-    "openrouter": "github:af-t/openrouter#v1.7.0",
+    "openrouter": "github:af-t/openrouter#v2.1.4",
     "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.21.0"
@@ -53,6 +53,6 @@
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.6.0",
     "pm2": "^7.0.1",
-    "prettier": "^3.8.3"
+    "prettier": "^3.8.4"
   }
 }

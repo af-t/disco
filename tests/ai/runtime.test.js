@@ -135,6 +135,43 @@ describe('ChannelAIRuntime with the agent pool', () => {
     assert.match(replies[0], /turn limit/i);
   });
 
+  it('natural dispatch scopes memory to the guild, outside the channel workspace', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const rt = new ChannelAIRuntime({
+      client: stubClient(),
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+    await rt.onMessage(msg({ content: 'hello there' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(pool.runs[0].spawnContext.memoryDir, path.join(rt.workspaceRoot, 'memory', 'guild-g1'));
+  });
+
+  it('natural dispatch in a DM scopes memory to the channel', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const client = stubClient();
+    client.getChannel = async (id) => ({ id, name: `chan-${id}`, guild_id: null });
+    const rt = new ChannelAIRuntime({
+      client,
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+    await rt.onMessage(msg({ content: 'hello there', guild_id: undefined }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(pool.runs[0].spawnContext.memoryDir, path.join(rt.workspaceRoot, 'memory', 'dm-c1'));
+  });
+
+  it('invoke command mode scopes memory per guild and user', async () => {
+    const pool = stubPool();
+    const rt = new ChannelAIRuntime({ client: stubClient(), pool, config: { dailyLimit: 1000 } });
+    await rt.invoke({ mode: 'command', msg: msg(), explicitPrompt: 'do a thing' });
+    assert.equal(pool.runs[0].spawnContext.memoryDir, path.join(rt.workspaceRoot, 'memory', 'command-g1-u1'));
+  });
+
   it('onAgentCharge increments the guild budget', async () => {
     const client = stubClient();
     const pool = stubPool();
