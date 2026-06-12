@@ -5,6 +5,8 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 
+const { unrefTimeout } = util;
+
 const server = createServer((req, res) => {
   res.writeHead(204);
   res.end();
@@ -33,7 +35,7 @@ wss.on('connection', (ws, req) => {
   let idleTimer = null;
   const resetIdle = () => {
     clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => ws.close(), IDLE_TIMEOUT_MS).unref();
+    idleTimer = unrefTimeout(() => ws.close(), IDLE_TIMEOUT_MS);
   };
   resetIdle();
 

@@ -1,4 +1,7 @@
 import createAgent from 'openrouter';
+import utility from '../../lib/utility.js';
+
+const { unrefTimeout } = utility;
 
 const execute = async (client, message, args, _rawArgs) => {
   const agent = await createAgent();
@@ -16,7 +19,7 @@ const execute = async (client, message, args, _rawArgs) => {
       await client
         .sendTyping(message.channel_id)
         .catch((err) => client.logger?.warn?.('Typing indicator failed:', err));
-      await new Promise((r) => setTimeout(r, 5000).unref());
+      await new Promise((r) => unrefTimeout(r, 5000));
     }
   };
 

@@ -2,6 +2,9 @@ import { fork as nodeFork } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { MSG } from './ipc.js';
 import { getExecutor } from './tools/index.js';
+import utility from '../lib/utility.js';
+
+const { unrefInterval } = utility;
 
 function deferred() {
   const { promise, resolve, reject } = Promise.withResolvers();
@@ -172,7 +175,7 @@ export class AgentPool {
     this.children = new Map();
     this.cooldowns = new Map();
     this._spawning = new Map();
-    this._timer = setInterval(() => this._maintain(), maintainMs).unref();
+    this._timer = unrefInterval(() => this._maintain(), maintainMs);
   }
 
   has(agentKey) {

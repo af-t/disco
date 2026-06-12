@@ -1,3 +1,7 @@
+import utility from '../../lib/utility.js';
+
+const { unrefTimeout } = utility;
+
 const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
 
 const execute = async (client, message, args) => {
@@ -73,13 +77,13 @@ const execute = async (client, message, args) => {
         ? await client.reply(message, content)
         : await client.sendMessage(message.channel_id, content);
     if (reply?.channel_id && reply?.id)
-      setTimeout(
+      unrefTimeout(
         () =>
           client
             .deleteMessage(message.channel_id, reply.id)
             .catch((err) => client.logger?.warn?.('Failed to auto-delete purge feedback:', err)),
         3_500,
-      ).unref();
+      );
   }
 };
 

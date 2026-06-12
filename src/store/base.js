@@ -1,5 +1,8 @@
 import v8 from 'node:v8';
 import { serialize } from 'node:v8';
+import utility from '../lib/utility.js';
+
+const { unrefTimeout } = utility;
 
 /**
  * Abstract base class for StoreManager and StoreClient.
@@ -263,7 +266,7 @@ class StoreBase {
   async _startMaintainer() {
     while (this._active) {
       await new Promise((resolve) => {
-        setTimeout(resolve, this.maintainInterval).unref();
+        unrefTimeout(resolve, this.maintainInterval);
       });
       if (!this._active) break;
 

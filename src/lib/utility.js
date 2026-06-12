@@ -232,6 +232,22 @@ async function getPermissions(client, guild_id, member) {
   return perms;
 }
 
+function unrefTimeout(fn, delay) {
+  const timer = setTimeout(fn, delay);
+  if (process.env.NODE_ENV !== 'test') {
+    timer.unref();
+  }
+  return timer;
+}
+
+function unrefInterval(fn, delay) {
+  const timer = setInterval(fn, delay);
+  if (process.env.NODE_ENV !== 'test') {
+    timer.unref();
+  }
+  return timer;
+}
+
 // eslint-disable-next-line no-global-assign
 console = new Logger('CONSOLE');
 
@@ -242,4 +258,6 @@ export default {
   Logger,
   formatAgo,
   getPermissions,
+  unrefTimeout,
+  unrefInterval,
 };

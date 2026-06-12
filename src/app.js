@@ -4,6 +4,8 @@ import tools from './lib/utility.js';
 import * as ai from './ai/index.js';
 import { join } from 'node:path';
 
+const { unrefTimeout } = tools;
+
 const __dirname = import.meta.dirname;
 
 const DATABASE_PATH = join(__dirname, '..', 'database');
@@ -24,7 +26,7 @@ const shutdown = async (code) => {
   if (shuttingDown) return;
   shuttingDown = true;
   // guard against stuck cleanup
-  setTimeout(() => process.exit(code), 5000).unref();
+  unrefTimeout(() => process.exit(code), 5000);
   try {
     await client.destroy();
     await store.close();

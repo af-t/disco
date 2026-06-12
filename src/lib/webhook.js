@@ -2,13 +2,9 @@ import https from 'node:https';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { basename } from 'node:path';
+import utility from './utility.js';
 
-const unrefTimer = (timer) => {
-  if (process.env.NODE_ENV !== 'test') {
-    timer.unref();
-  }
-  return timer;
-};
+const { unrefTimeout } = utility;
 
 class DiscordWebhookTools {
   static MAX_RETRIES = 3;
@@ -65,12 +61,12 @@ class DiscordWebhookTools {
 
     if (now < this.#resetTime) {
       const delay = this.#resetTime - now;
-      await new Promise((resolve) => unrefTimer(setTimeout(resolve, delay)));
+      await new Promise((resolve) => unrefTimeout(resolve, delay));
     }
 
     if (this.#remainingRequests <= 0) {
       const delay = Math.max(0, this.#resetTime - now);
-      await new Promise((resolve) => unrefTimer(setTimeout(resolve, delay)));
+      await new Promise((resolve) => unrefTimeout(resolve, delay));
     }
   }
 
@@ -144,13 +140,11 @@ class DiscordWebhookTools {
           } else if (res.statusCode === 429 && retryCount < DiscordWebhookTools.MAX_RETRIES) {
             // Rate limited - retry after delay
             const retryAfter = parseInt(res.headers['retry-after'] ?? '1000');
-            unrefTimer(
-              setTimeout(() => {
-                this.sendRawRequest(data, options, retryCount + 1)
-                  .then(resolve)
-                  .catch(reject);
-              }, retryAfter),
-            );
+            unrefTimeout(() => {
+              this.sendRawRequest(data, options, retryCount + 1)
+                .then(resolve)
+                .catch(reject);
+            }, retryAfter);
           } else {
             reject(new Error(`HTTP ${res.statusCode}: ${responseData}`));
           }
@@ -160,13 +154,11 @@ class DiscordWebhookTools {
       req.on('timeout', () => {
         req.destroy();
         if (retryCount < DiscordWebhookTools.MAX_RETRIES) {
-          unrefTimer(
-            setTimeout(() => {
-              this.sendRawRequest(data, options, retryCount + 1)
-                .then(resolve)
-                .catch(reject);
-            }, DiscordWebhookTools.RETRY_DELAY),
-          );
+          unrefTimeout(() => {
+            this.sendRawRequest(data, options, retryCount + 1)
+              .then(resolve)
+              .catch(reject);
+          }, DiscordWebhookTools.RETRY_DELAY);
         } else {
           reject(new Error('Request timeout'));
         }
@@ -174,13 +166,11 @@ class DiscordWebhookTools {
 
       req.on('error', (error) => {
         if (retryCount < DiscordWebhookTools.MAX_RETRIES) {
-          unrefTimer(
-            setTimeout(() => {
-              this.sendRawRequest(data, options, retryCount + 1)
-                .then(resolve)
-                .catch(reject);
-            }, DiscordWebhookTools.RETRY_DELAY),
-          );
+          unrefTimeout(() => {
+            this.sendRawRequest(data, options, retryCount + 1)
+              .then(resolve)
+              .catch(reject);
+          }, DiscordWebhookTools.RETRY_DELAY);
         } else {
           reject(error);
         }

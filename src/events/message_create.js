@@ -1,7 +1,7 @@
 import permissionFlags from '../lib/permission.js';
 import tools from '../lib/utility.js';
 
-const { formatAgo, getPermissions } = tools;
+const { formatAgo, getPermissions, unrefTimeout } = tools;
 const COMMAND_PREFIX = '.';
 
 // Rate limit: commands per second per user
@@ -26,13 +26,13 @@ const parseDM = async (client, message) => {
 
   dm.reading = true;
   return new Promise((resolve) =>
-    setTimeout(() => {
+    unrefTimeout(() => {
       client.tempDM.delete(userId); // delete first
       resolve({
         useAI: true,
         rawArgs: dm.contents.join('\n'),
       });
-    }, 7000).unref(),
+    }, 7000),
   );
 };
 
@@ -144,13 +144,13 @@ export default async (client, m) => {
             m.channel_id,
             `🚫 **${m.author.username}**, posting links is not allowed here!`,
           );
-          setTimeout(
+          unrefTimeout(
             () =>
               client
                 .deleteMessage(m.channel_id, warn.id)
                 .catch((err) => client.logger?.warn?.('Failed to delete link warning:', err)),
             5000,
-          ).unref();
+          );
           return;
         }
       }
@@ -180,13 +180,13 @@ export default async (client, m) => {
         m.channel_id,
         `👋 Welcome back **${m.author.global_name || m.author.username}**! You were AFK since ${ago}.`,
       );
-      setTimeout(
+      unrefTimeout(
         () =>
           client
             .deleteMessage(m.channel_id, reply.id)
             .catch((err) => client.logger?.warn?.('Failed to delete AFK welcome:', err)),
         5000,
-      ).unref();
+      );
     }
 
     // Hook B: Notify about AFK-mentioned users
@@ -202,13 +202,13 @@ export default async (client, m) => {
     if (afkMentions.length) {
       const lines = afkMentions.map((a) => `💤 <@${a.id}> is AFK: _${a.message}_ (${formatAgo(a.since)})`);
       const reply = await client.sendMessage(m.channel_id, lines.join('\n'));
-      setTimeout(
+      unrefTimeout(
         () =>
           client
             .deleteMessage(m.channel_id, reply.id)
             .catch((err) => client.logger?.warn?.('Failed to delete AFK mention notice:', err)),
         10000,
-      ).unref();
+      );
     }
   }
 
@@ -251,7 +251,7 @@ export default async (client, m) => {
         m.channel_id,
         `**${m.author.global_name || m.author.username}**! Please slow down~ You're a little too fast.`,
       );
-      setTimeout(() => client.deleteMessage(m.channel_id, reply.id), 3000).unref();
+      unrefTimeout(() => client.deleteMessage(m.channel_id, reply.id), 3000);
       return;
     }
     await client.store.set(`request_limit:${m.author.id}`, cached, true);

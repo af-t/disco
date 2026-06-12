@@ -1,6 +1,9 @@
 import level3 from './level_3.js';
 import dgram from 'node:dgram';
 import { encrypt, decrypt, PREFERRED_MODES } from './voice/crypto.js';
+import utility from '../lib/utility.js';
+
+const { unrefTimeout, unrefInterval } = utility;
 
 // ---- Voice WebSocket opcodes ----
 const VOICE_OP = {
@@ -212,13 +215,13 @@ class VoiceConnection {
     });
 
     // Timeout for IP discovery
-    this._ipDiscoveryTimeout = setTimeout(() => {
+    this._ipDiscoveryTimeout = unrefTimeout(() => {
       if (!this.externalIp) {
         this.client.logger?.error?.(`IP discovery timed out for guild ${this.guildId}`);
         // Fallback: use internal IP from ready
         this._selectProtocol(this._ip, this._port);
       }
-    }, 5000).unref();
+    }, 5000);
   }
 
   _onUdpMessage(msg) {
@@ -350,14 +353,14 @@ class VoiceConnection {
     this._clearVoiceHeartbeat();
     this.ackReceived = true;
 
-    this.heartbeatJitter = setTimeout(
+    this.heartbeatJitter = unrefTimeout(
       () => {
         this.heartbeatJitter = null;
         this._sendVoiceHeartbeat();
-        this.heartbeat = setInterval(() => this._sendVoiceHeartbeat(), interval).unref();
+        this.heartbeat = unrefInterval(() => this._sendVoiceHeartbeat(), interval);
       },
       Math.floor(Math.random() * interval),
-    ).unref();
+    );
   }
 
   _sendVoiceHeartbeat() {
@@ -446,13 +449,13 @@ class DiscordClient extends level3 {
       this.#pendingVoiceJoin.set(guildId, { resolve, reject, channelId });
 
       // Timeout after 15 seconds
-      setTimeout(() => {
+      unrefTimeout(() => {
         if (this.#pendingVoiceJoin.has(guildId)) {
           const pending = this.#pendingVoiceJoin.get(guildId);
           this.#pendingVoiceJoin.delete(guildId);
           pending.reject(new Error(`Voice join timed out for guild ${guildId}`));
         }
-      }, 15000).unref();
+      }, 15000);
     });
   }
 
@@ -520,7 +523,7 @@ class DiscordClient extends level3 {
 
     // Need a short delay for VOICE_STATE_UPDATE to arrive first
     if (!this._voiceSessionId) {
-      await new Promise((r) => setTimeout(r, 500).unref());
+      await new Promise((r) => unrefTimeout(r, 500));
     }
 
     const conn = new VoiceConnection(this, guild_id, pending.channelId, this.options);
@@ -555,11 +558,11 @@ class DiscordClient extends level3 {
         };
         this.on('VOICE_CONNECT', onConnect);
         this.on('VOICE_DISCONNECT', onFail);
-        setTimeout(() => {
+        unrefTimeout(() => {
           this.off('VOICE_CONNECT', onConnect);
           this.off('VOICE_DISCONNECT', onFail);
           reject(new Error('Voice connection timed out'));
-        }, 10000).unref();
+        }, 10000);
       });
 
       this.#pendingVoiceJoin.delete(guild_id);

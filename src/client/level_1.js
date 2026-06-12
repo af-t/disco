@@ -3,6 +3,9 @@ import zlib from 'node:zlib';
 import { EventEmitter } from 'node:events';
 
 import intentBits from '../lib/intents.js';
+import utility from '../lib/utility.js';
+
+const { unrefTimeout, unrefInterval } = utility;
 
 const DEFAULT_INTENT_KEYS = [
   'GUILDS',
@@ -216,7 +219,7 @@ class DiscordClient extends EventEmitter {
             this._session.id = null;
             this._session.seq = null;
             this._gatewayUrl = GATEWAY;
-            setTimeout(() => this._identify(), 2000).unref();
+            unrefTimeout(() => this._identify(), 2000);
           }
           break;
         case 10: // Hello
@@ -315,10 +318,10 @@ class DiscordClient extends EventEmitter {
       const baseDelay = RECONNECT_DELAY * Math.pow(2, this._reconnectAttempt - 1);
       const jitter = Math.random() * 1000;
       const delay = Math.min(baseDelay + jitter, RECONNECT_MAX_DELAY);
-      this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = unrefTimeout(() => {
         this._reconnectTimer = null;
         if (!this._destroyed) this.connect();
-      }, delay).unref();
+      }, delay);
     }
   }
 
@@ -355,14 +358,14 @@ class DiscordClient extends EventEmitter {
     this._ackReceived = true;
 
     // jittered first beat per Discord spec
-    this._heartbeatJitter = setTimeout(
+    this._heartbeatJitter = unrefTimeout(
       () => {
         this._heartbeatJitter = null;
         this._sendHeartbeat();
-        this._heartbeat = setInterval(this._sendHeartbeat.bind(this), interval).unref();
+        this._heartbeat = unrefInterval(this._sendHeartbeat.bind(this), interval);
       },
       Math.floor(Math.random() * interval),
-    ).unref();
+    );
   }
 
   _clearHeartbeat() {

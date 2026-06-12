@@ -1,4 +1,8 @@
+import utility from '../lib/utility.js';
+
+const { unrefTimeout } = utility;
+
 export default async (client, m) => {
   client.logger.warn(m);
-  setTimeout(() => client.connect(), 30_000).unref();
+  unrefTimeout(() => client.connect(), 30_000);
 };

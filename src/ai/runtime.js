@@ -4,6 +4,9 @@ import { snapshotFromMessage, renderEventBlock } from './event-format.js';
 import { prefilter } from './prefilter.js';
 import { createBudget } from './budget.js';
 import { buildSystemPrompt, buildTurnInjector, buildCommandSystemPrompt } from './prompt.js';
+import utility from '../lib/utility.js';
+
+const { unrefTimeout } = utility;
 
 function sanitizeFilename(name) {
   const base = path.basename(name ?? 'file');
@@ -288,10 +291,10 @@ export class ChannelAIRuntime {
   _scheduleFlush(channelId, delay) {
     const s = this._state(channelId);
     if (s.debounceTimer) clearTimeout(s.debounceTimer);
-    s.debounceTimer = setTimeout(
+    s.debounceTimer = unrefTimeout(
       () => this._flush(channelId).catch((err) => this.client.logger?.error?.('AI flush error', err)),
       delay,
-    ).unref();
+    );
   }
 
   async _flush(channelId) {
