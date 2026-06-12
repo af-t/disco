@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ "**" ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  NODE_ENV: test
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest

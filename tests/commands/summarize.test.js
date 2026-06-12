@@ -41,18 +41,29 @@ describe('summarize command', () => {
   it('creates a fresh agent per invocation, not a shared module-level singleton', async () => {
     const createdAgents = [];
 
-    await mock.module('openrouter', {
-      exports: {
-        default: async () => {
-          const agent = {
-            messages: [],
-            run: async () => 'summary text',
-          };
-          createdAgents.push(agent);
-          return agent;
+    const [major, minor] = process.versions.node.split('.').map(Number);
+    const useExports = major > 25 || (major === 25 && minor >= 9);
+
+    const mockAgentCreator = async () => {
+      const agent = {
+        messages: [],
+        run: async () => 'summary text',
+      };
+      createdAgents.push(agent);
+      return agent;
+    };
+
+    if (useExports) {
+      await mock.module('openrouter', {
+        exports: {
+          default: mockAgentCreator,
         },
-      },
-    });
+      });
+    } else {
+      await mock.module('openrouter', {
+        defaultExport: mockAgentCreator,
+      });
+    }
 
     const { default: summarize } = await import('../../src/commands/utils/summarize.js');
 

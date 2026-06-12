@@ -1,6 +1,13 @@
 import { serialize, deserialize } from 'node:v8';
 import StoreBase from './base.js';
 
+const unrefTimer = (timer) => {
+  if (process.env.NODE_ENV !== 'test') {
+    timer.unref();
+  }
+  return timer;
+};
+
 const ACTION = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3, HAS: 4, METADATA: 5, ATTR_SET: 6, ATTR_GET: 7 });
 const LOCATION = Object.freeze({ MEMORY: 0, SERVER: 1 });
 
@@ -445,7 +452,7 @@ class StoreClient extends StoreBase {
 
   _resetIdleTimer() {
     clearTimeout(this._idleTimer);
-    this._idleTimer = setTimeout(() => this._disconnectIdle(), StoreClient.IDLE_DISCONNECT_MS).unref();
+    this._idleTimer = unrefTimer(setTimeout(() => this._disconnectIdle(), StoreClient.IDLE_DISCONNECT_MS));
   }
 
   _disconnectIdle() {
@@ -464,7 +471,7 @@ class StoreClient extends StoreBase {
         .then(() => this._ws?.readyState === this._WebSocketImpl.OPEN)
         .catch(() => false),
       new Promise((resolve) => {
-        timeoutId = setTimeout(() => resolve(false), timeoutMs).unref();
+        timeoutId = unrefTimer(setTimeout(() => resolve(false), timeoutMs));
       }),
     ]);
     clearTimeout(timeoutId);
@@ -488,7 +495,7 @@ class StoreClient extends StoreBase {
     if (this._ws?.readyState === this._WebSocketImpl.OPEN) return;
     let timeoutId;
     const timeout = new Promise((resolve) => {
-      timeoutId = setTimeout(resolve, timeoutMs).unref();
+      timeoutId = unrefTimer(setTimeout(resolve, timeoutMs));
     });
     try {
       await Promise.race([Promise.resolve(this._ensureConnected()).catch(() => {}), timeout]);
@@ -514,10 +521,12 @@ class StoreClient extends StoreBase {
     this._log('info', `reconnecting in ${Math.round(delay / 1000)}s (attempt ${this._retryAttempt + 1})...`);
 
     clearTimeout(this._retryTimer);
-    this._retryTimer = setTimeout(() => {
-      this._retryTimer = null;
-      this.connect().then(resolve);
-    }, delay).unref();
+    this._retryTimer = unrefTimer(
+      setTimeout(() => {
+        this._retryTimer = null;
+        this.connect().then(resolve);
+      }, delay),
+    );
   }
 
   async connect() {
@@ -639,11 +648,13 @@ class StoreClient extends StoreBase {
       });
 
       // Arm the timeout before send so a synchronous send error still clears it
-      timeout = setTimeout(() => {
-        if (this._pendingRequests.has(id)) {
-          settle(reject, new Error('Request timed out'));
-        }
-      }, 30000).unref();
+      timeout = unrefTimer(
+        setTimeout(() => {
+          if (this._pendingRequests.has(id)) {
+            settle(reject, new Error('Request timed out'));
+          }
+        }, 30000),
+      );
 
       const payload = JSON.stringify({ op, id, args });
       try {
