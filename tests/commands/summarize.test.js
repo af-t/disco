@@ -54,13 +54,13 @@ describe('summarize command', () => {
     };
 
     if (useExports) {
-      await mock.module('openrouter', {
+      await mock.module('@af-t/agent-sdk', {
         exports: {
           default: mockAgentCreator,
         },
       });
     } else {
-      await mock.module('openrouter', {
+      await mock.module('@af-t/agent-sdk', {
         defaultExport: mockAgentCreator,
       });
     }

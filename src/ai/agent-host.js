@@ -1,5 +1,5 @@
 import '../dns-override.js';
-import createAgent from 'openrouter';
+import createAgent from '@af-t/agent-sdk';
 import { MSG } from './ipc.js';
 import { buildProxyTools } from './tools/index.js';
 import { createHost, resolveStoragePaths } from './agent-host-core.js';

@@ -1,4 +1,4 @@
-import createAgent from 'openrouter';
+import createAgent from '@af-t/agent-sdk';
 import utility from '../../lib/utility.js';
 
 const { unrefTimeout } = utility;

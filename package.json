@@ -42,14 +42,14 @@
     "node": ">=22.3.0"
   },
   "dependencies": {
-    "openrouter": "github:af-t/openrouter#v2.1.5",
+    "@af-t/agent-sdk": "git+https://github.com/af-t/agent-sdk.git#v2.1.8",
     "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.4.1",
+    "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.6.0",
     "pm2": "^7.0.1",

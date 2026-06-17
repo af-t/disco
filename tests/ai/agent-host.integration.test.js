@@ -11,7 +11,7 @@ const FAKE = path.resolve('tests/ai/fixtures/fake-openrouter.js');
 describe('agent-host integration', () => {
   it('runs init -> ready -> prompt -> tool -> done over real IPC', async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'agenthost-'));
-    // Redirect the bare "openrouter" import to the fake via an import map.
+    // Redirect the agent-sdk import to the fake via an import map.
     const child = fork(HOST, [], {
       cwd,
       env: { ...process.env, OPENROUTER_API_KEY: 'test' },
@@ -20,7 +20,7 @@ describe('agent-host integration', () => {
         `data:text/javascript,${encodeURIComponent(
           `import { register } from 'node:module';` +
             `register('data:text/javascript,' + encodeURIComponent(` +
-            `'export async function resolve(s,c,n){return s===\\'openrouter\\'?n(${JSON.stringify(FAKE)}):n(s);}'` +
+            `'export async function resolve(s,c,n){return s===\\'@af-t/agent-sdk\\'?n(${JSON.stringify(FAKE)}):n(s);}'` +
             `), import.meta.url);`,
         )}`,
       ],
