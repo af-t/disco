@@ -145,6 +145,11 @@ const CHILD_ENV_KEYS = [
   'OPENROUTER_MODEL',
   'OPENROUTER_MAX_COMPLETION_TOKENS',
   'OPENROUTER_EMBEDDING_MODEL',
+  // Tune the SDK's built-in empty-turn recovery for pooled agents
+  'OPENROUTER_EMPTY_TURN_RECOVERY',
+  'OPENROUTER_EMPTY_TURN_RETRIES',
+  // Storage namespace for agent default dirs (.disco/memory etc.)
+  'AGENT_SDK_APP_NAME',
   'OPENROUTER_ORDER',
   'OPENROUTER_ONLY',
   'TAVILY_API_KEY',
