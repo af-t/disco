@@ -1,9 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const projectRoot = join(import.meta.dirname, '..', '..');
 
@@ -38,9 +39,10 @@ describe('env load order', () => {
     });
 
     it('applies custom .env values to module-scope constants via subprocess simulation', () => {
-      const envPath = join(projectRoot, 'tmp', '.test-env-order');
-      const scriptPath = join(projectRoot, 'tmp', '.test-env-order.mjs');
-      mkdirSync(join(projectRoot, 'tmp'), { recursive: true });
+      const tmpPath = join(tmpdir(), 'env-load-order-test-' + Date.now());
+      const envPath = join(tmpPath, '.test-env-order');
+      const scriptPath = join(tmpPath, '.test-env-order.mjs');
+      mkdirSync(tmpPath, { recursive: true });
       writeFileSync(
         envPath,
         'DISCORD_RECONNECT_DELAY=86753\nDISCORD_RECONNECT_LIMIT=2\nDISCORD_GATEWAY_URL=wss://custom.example/\nDISCORD_MAX_RETRIES=4\n',
@@ -74,8 +76,7 @@ describe('env load order', () => {
         assert.strictEqual(result.mr, 4, 'DISCORD_MAX_RETRIES from .env should override default 3');
       } finally {
         try {
-          unlinkSync(envPath);
-          unlinkSync(scriptPath);
+          rmSync(tmpPath, { recursive: true, force: true });
         } catch {
           // best-effort cleanup
         }
