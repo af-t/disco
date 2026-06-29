@@ -13,3 +13,11 @@ export function formatToolError(err) {
   }
   return String(err);
 }
+
+export async function withToolErrorHandling(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    return JSON.stringify({ ok: false, error: formatToolError(err) });
+  }
+}

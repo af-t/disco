@@ -52,6 +52,24 @@ const drain = (n = 5) =>
   });
 
 // ── connect(): guards (run first while wsInstances is clean) ──────────────────
+function startConnectionMock() {
+  const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+  const connectPromise = client.connect();
+  client._reconnect = false;
+  return { client, connectPromise };
+}
+
+function startConnectionMockWithLogs() {
+  const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
+  const logs = [];
+  client._log = (level, ...rest) => {
+    logs.push([level, rest.join(' ')]);
+  };
+  const connectPromise = client.connect();
+  client._reconnect = false;
+  return { client, connectPromise, logs };
+}
+
 describe('StoreClient connect guards', () => {
   afterEach(() => {
     wsInstances.length = 0;
@@ -83,11 +101,7 @@ describe('StoreClient connect open event', () => {
   });
 
   it('resolves after open fires and _send new+ready succeed', async () => {
-    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
-    // _reconnect is true by default — connect() will proceed
-    // Disable reconnect AFTER starting connect so retry loops don't fire
-    const connectPromise = client.connect();
-    client._reconnect = false;
+    const { client, connectPromise } = startConnectionMock();
 
     // MockWS was created synchronously inside connect()
     assert.strictEqual(wsInstances.length, 1);
@@ -101,13 +115,7 @@ describe('StoreClient connect open event', () => {
   });
 
   it('logs warning when _send fails inside open handler but still resolves', async () => {
-    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
-    const logs = [];
-    client._log = (level, ...rest) => {
-      logs.push([level, rest.join(' ')]);
-    };
-    const connectPromise = client.connect();
-    client._reconnect = false;
+    const { client, connectPromise, logs } = startConnectionMockWithLogs();
 
     // Override send to always error so _send('new') rejects inside the open handler
     wsInstances[0].send = (_payload) => {
@@ -131,10 +139,7 @@ describe('StoreClient connect error event', () => {
   });
 
   it('clears _ws and calls scheduleRetry on error', async () => {
-    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
-    const connectPromise = client.connect();
-    // Disable reconnect so scheduleRetry resolves immediately
-    client._reconnect = false;
+    const { client, connectPromise } = startConnectionMock();
 
     assert.strictEqual(wsInstances.length, 1);
     wsInstances[0].dispatch('error', { message: 'ECONNREFUSED', error: new Error('ECONNREFUSED') });
@@ -154,9 +159,7 @@ describe('StoreClient connect close event no reconnect', () => {
   });
 
   it('resolves and clears _ws when closed without reconnect', async () => {
-    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
-    const connectPromise = client.connect();
-    client._reconnect = false;
+    const { client, connectPromise } = startConnectionMock();
 
     assert.strictEqual(wsInstances.length, 1);
     wsInstances[0].dispatch('close', { code: 1000, reason: '' });
@@ -204,13 +207,7 @@ describe('StoreClient connect message event', () => {
   });
 
   it('handles deserialize error in message handler gracefully', async () => {
-    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
-    const logs = [];
-    client._log = (level, ...rest) => {
-      logs.push([level, rest.join(' ')]);
-    };
-    const connectPromise = client.connect();
-    client._reconnect = false;
+    const { connectPromise, logs } = startConnectionMockWithLogs();
 
     // Emit a malformed buffer — the message handler must catch the deserialize error
     wsInstances[0].dispatch('message', { data: Buffer.from('not-v8-data') });
@@ -224,9 +221,7 @@ describe('StoreClient connect message event', () => {
   });
 
   it('routes valid message to pending request resolver', async () => {
-    const client = new StoreClient({ url: 'ws://mock', webSocketImpl: MockWS });
-    const connectPromise = client.connect();
-    client._reconnect = false;
+    const { client, connectPromise } = startConnectionMock();
 
     // Register a pending request manually
     let resolved;

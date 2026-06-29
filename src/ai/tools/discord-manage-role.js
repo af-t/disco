@@ -1,4 +1,4 @@
-import { formatToolError } from './error.js';
+import { withToolErrorHandling } from './error.js';
 import { authorize } from './authorize.js';
 
 export const definition = {
@@ -25,7 +25,7 @@ export const definition = {
 export async function execute(ctx, input) {
   const auth = await authorize(ctx, input, 'MANAGE_ROLES');
   if (!auth.ok) return JSON.stringify(auth);
-  try {
+  return withToolErrorHandling(async () => {
     switch (input.action) {
       case 'create': {
         const created = await ctx.client.createRole(auth.guildId, input.options ?? {});
@@ -52,7 +52,5 @@ export async function execute(ctx, input) {
       default:
         return JSON.stringify({ ok: false, error: `unknown action ${input.action}` });
     }
-  } catch (err) {
-    return JSON.stringify({ ok: false, error: formatToolError(err) });
-  }
+  });
 }

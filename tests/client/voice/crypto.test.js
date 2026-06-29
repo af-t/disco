@@ -79,6 +79,23 @@ describe('voice crypto', () => {
     });
   });
 
+  function runDecryptFailureTests(buildFn, mode) {
+    it('returns null on wrong key', () => {
+      const k1 = randomBytes(32);
+      const k2 = randomBytes(32);
+      const header = Buffer.alloc(12);
+      const frame = Buffer.from('x');
+      const packet = buildFn(k1, header, frame);
+      assert.equal(decrypt(mode, k2, packet, header.length), null);
+    });
+
+    it('returns null on truncated packet', () => {
+      const key = randomBytes(32);
+      const header = Buffer.alloc(12);
+      assert.equal(decrypt(mode, key, header, header.length), null);
+    });
+  }
+
   describe('xsalsa20_poly1305_suffix (decrypt only)', () => {
     const mode = 'xsalsa20_poly1305_suffix';
 
@@ -97,20 +114,7 @@ describe('voice crypto', () => {
       assert.deepEqual(out, frame);
     });
 
-    it('returns null on wrong key', () => {
-      const k1 = randomBytes(32);
-      const k2 = randomBytes(32);
-      const header = Buffer.alloc(12);
-      const frame = Buffer.from('x');
-      const { packet } = buildPacket(k1, header, frame);
-      assert.equal(decrypt(mode, k2, packet, header.length), null);
-    });
-
-    it('returns null on truncated packet', () => {
-      const key = randomBytes(32);
-      const header = Buffer.alloc(12);
-      assert.equal(decrypt(mode, key, header, header.length), null);
-    });
+    runDecryptFailureTests((k, h, f) => buildPacket(k, h, f).packet, mode);
   });
 
   describe('xsalsa20_poly1305 (decrypt only)', () => {
@@ -132,19 +136,6 @@ describe('voice crypto', () => {
       assert.deepEqual(out, frame);
     });
 
-    it('returns null on wrong key', () => {
-      const k1 = randomBytes(32);
-      const k2 = randomBytes(32);
-      const header = Buffer.alloc(12);
-      const frame = Buffer.from('x');
-      const packet = buildPacket(k1, header, frame);
-      assert.equal(decrypt(mode, k2, packet, header.length), null);
-    });
-
-    it('returns null on truncated packet', () => {
-      const key = randomBytes(32);
-      const header = Buffer.alloc(12);
-      assert.equal(decrypt(mode, key, header, header.length), null);
-    });
+    runDecryptFailureTests(buildPacket, mode);
   });
 });

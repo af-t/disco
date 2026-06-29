@@ -1,5 +1,6 @@
 import permissionFlags from '../lib/permission.js';
 import tools from '../lib/utility.js';
+import { checkRateLimit, getMaxPerSec } from '../lib/event_utils.js';
 
 const { getPermissions } = tools;
 
@@ -104,18 +105,9 @@ export default async (client, interaction) => {
     : { notified: false, time: Date.now(), count: 0 };
 
   const cmdLower = name.toLowerCase();
-  const maxPerSec = HEAVY_COMMANDS.has(cmdLower)
-    ? RATE_LIMIT.HEAVY
-    : cmd.permissions?.length
-      ? RATE_LIMIT.MODERATE
-      : RATE_LIMIT.DEFAULT;
+  const maxPerSec = getMaxPerSec(cmdLower, HEAVY_COMMANDS, RATE_LIMIT, cmd.permissions?.length);
 
-  if (Date.now() - cached.time > 1000) {
-    cached.time = Date.now();
-    cached.count = 0;
-    cached.notified = false;
-  }
-  if (++cached.count > maxPerSec) {
+  if (checkRateLimit(cached, maxPerSec)) {
     if (!cached.notified) {
       cached.notified = true;
       await client.store.set(rateLimitKey, cached, true);

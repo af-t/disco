@@ -4,6 +4,18 @@ import utility from '../lib/utility.js';
 
 const { unrefTimeout } = utility;
 
+export const ACTION = Object.freeze({
+  CLEAR: 0,
+  SET: 1,
+  GET: 2,
+  DELETE: 3,
+  HAS: 4,
+  METADATA: 5,
+  ATTR_SET: 6,
+  ATTR_GET: 7,
+});
+export const LOCATION = Object.freeze({ MEMORY: 0, SERVER: 1, DISK: 1 });
+
 /**
  * Abstract base class for StoreManager and StoreClient.
  * Contains shared queue processing, maintenance, stats, and utility methods.
@@ -42,31 +54,37 @@ class StoreBase {
 
   // --- Public API (implemented in subclasses) ---
 
-  /** @abstract */
-  async set(_key, _data, _options) {
-    throw new Error('Not implemented');
+  async set(key, data, options = false) {
+    if (typeof key !== 'string') throw new TypeError('key must be a string');
+    this._stats.operations.set++;
+    return this._addAction(ACTION.SET, key, data, options);
   }
-  /** @abstract */
-  async get(_key) {
-    throw new Error('Not implemented');
+
+  async get(key) {
+    if (typeof key !== 'string') throw new TypeError('key must be a string');
+    this._stats.operations.get++;
+    return this._addAction(ACTION.GET, key);
   }
-  /** @abstract */
-  async delete(_key) {
-    throw new Error('Not implemented');
+
+  async delete(key) {
+    if (typeof key !== 'string') throw new TypeError('key must be a string');
+    this._stats.operations.delete++;
+    return this._addAction(ACTION.DELETE, key);
   }
-  /** @abstract */
+
   async clear() {
-    throw new Error('Not implemented');
+    this._stats.operations.clear++;
+    return this._addAction(ACTION.CLEAR);
   }
 
   async has(key) {
     if (typeof key !== 'string') throw new TypeError('key must be a string');
-    return this._addAction('HAS', key);
+    return this._addAction(ACTION.HAS, key);
   }
 
   async metadata(key) {
     if (typeof key !== 'string') throw new TypeError('key must be a string');
-    return this._addAction('METADATA', key);
+    return this._addAction(ACTION.METADATA, key);
   }
 
   // --- Stats ---
@@ -76,7 +94,7 @@ class StoreBase {
     let itemsOnBackend = 0;
     let dataBytes = 0;
     for (const m of this._metadata.values()) {
-      if (m.location === 0) {
+      if (m.location === LOCATION.MEMORY) {
         // LOCATION.MEMORY
         itemsInMemory++;
         if (m.dataSizeV8 > 0) dataBytes += m.dataSizeV8;
@@ -233,8 +251,60 @@ class StoreBase {
    * @param {...*} args
    * @returns {() => Promise} function that resolves with the result value
    */
-  _createTask(action, ..._args) {
-    throw new Error(`_createTask not implemented for action: ${action}`);
+  _createTask(action, key, _data, _options) {
+    switch (action) {
+      case ACTION.DELETE:
+        return async () => {
+          await this._delete(key);
+        };
+      case ACTION.HAS:
+        return async () => {
+          return this._metadata.has(key);
+        };
+      case ACTION.METADATA:
+        return async () => {
+          return Object.assign({}, this._metadata.get(key) || {});
+        };
+      default:
+        throw new Error(`Unknown action: ${action}`);
+    }
+  }
+
+  _updateMemoryMeta(key, data, meta, customTTL) {
+    meta.accessCount = 0;
+    meta.location = 0; // LOCATION.MEMORY
+    if (customTTL !== null) {
+      meta.customTTL = customTTL;
+      meta.expired = Date.now() + customTTL;
+    }
+
+    try {
+      meta.dataSizeV8 = serialize(data).length;
+    } catch (err) {
+      this._stats.errors.serialize++;
+      this._log('error', 'serialize failed for key', key, err);
+      return false;
+    }
+
+    meta.lastAccess = Date.now();
+    if (customTTL === null) {
+      meta.expired = Date.now() + this.memoryTTL;
+    }
+    this._data.set(key, data);
+    this._metadata.set(key, meta);
+    return true;
+  }
+
+  async _executeClear() {
+    if (this.onDelete) {
+      for (const [k, m] of this._metadata.entries()) {
+        try {
+          await this.onDelete(k, m);
+        } catch {}
+      }
+    }
+    this._metadata.clear();
+    this._data.clear();
   }
 
   // --- Queue Worker ---

@@ -80,19 +80,23 @@ function stopClient(client) {
   client._notifier?.();
 }
 
+function mockWsSend(ws, dataResolver, delay = 5) {
+  ws.send = (payload) => {
+    const { op, id } = JSON.parse(payload);
+    setTimeout(() => {
+      const data = dataResolver(op);
+      ws.dispatch('message', { data: serialize({ id, data }) });
+    }, delay);
+  };
+}
+
 // ── Original test (migrated to describe/it) ──────────────────────────────────
 describe('StoreClient connect and send/receive', () => {
   afterEach(() => mock.restoreAll());
 
   it('sends a GET and receives a response', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload) => {
-      const { op, id } = JSON.parse(payload);
-      setTimeout(() => {
-        const data = op === 'get' ? 'pong' : null;
-        ws.dispatch('message', { data: serialize({ id, data }) });
-      }, 10);
-    };
+    mockWsSend(ws, (op) => (op === 'get' ? 'pong' : null), 10);
     const result = await client.get('test');
     assert.strictEqual(result, 'pong');
     stopClient(client);
@@ -280,10 +284,7 @@ describe('StoreClient _createTask GET', () => {
 
   it('server fallback returns null: miss, returns undefined, no promotion', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload) => {
-      const { id } = JSON.parse(payload);
-      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: null }) }), 5);
-    };
+    mockWsSend(ws, () => null);
     const result = await client.get('missing');
     assert.strictEqual(result, undefined);
     assert.strictEqual(client._stats.cache.misses, 1);
@@ -371,13 +372,7 @@ describe('StoreClient _createTask HAS/METADATA/ATTR', () => {
 
   it('setAttr/getAttr when WS connected', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload) => {
-      const { op, id } = JSON.parse(payload);
-      setTimeout(() => {
-        const data = op === 'get-attr' ? 'attr-value' : true;
-        ws.dispatch('message', { data: serialize({ id, data }) });
-      }, 5);
-    };
+    mockWsSend(ws, (op) => (op === 'get-attr' ? 'attr-value' : true));
     const set = await client.setAttr('myattr', 'val');
     assert.strictEqual(set, true);
     const got = await client.getAttr('myattr');
@@ -427,10 +422,7 @@ describe('StoreClient _createTask unknown action', () => {
 describe('StoreClient _demote', () => {
   it('moves item to SERVER on success', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload) => {
-      const { id } = JSON.parse(payload);
-      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: true }) }), 5);
-    };
+    mockWsSend(ws, () => true);
     await client.set('k', 'v');
     await client._demote('k');
     assert.strictEqual(client._metadata.get('k').location, 1); // SERVER
@@ -459,10 +451,7 @@ describe('StoreClient _demote', () => {
 
   it('uses customTTL for expired when present', async () => {
     const { client, ws } = makeClient();
-    ws.send = (payload) => {
-      const { id } = JSON.parse(payload);
-      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: true }) }), 5);
-    };
+    mockWsSend(ws, () => true);
     await client.set('k', 'v', { ttl: 9999 });
     const before = Date.now();
     await client._demote('k');
@@ -584,10 +573,7 @@ describe('StoreClient close', () => {
       drained.push('task');
     });
     // _demoteAll will call _send; mock it to succeed
-    ws.send = (payload) => {
-      const { id } = JSON.parse(payload);
-      setTimeout(() => ws.dispatch('message', { data: serialize({ id, data: true }) }), 5);
-    };
+    mockWsSend(ws, () => true);
     const result = await client.close();
     assert.strictEqual(result, true);
     assert.deepStrictEqual(drained, ['task']);

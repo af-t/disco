@@ -1,6 +1,5 @@
-import { formatToolError } from './error.js';
 import { authorize } from './authorize.js';
-import { recordModeration } from './mod-record.js';
+import { executeModeration } from './mod-record.js';
 
 export const definition = {
   name: 'discord_ban_member',
@@ -25,21 +24,10 @@ export const definition = {
 export async function execute(ctx, input) {
   const auth = await authorize(ctx, input, 'BAN_MEMBERS');
   if (!auth.ok) return JSON.stringify(auth);
-  try {
-    const reason = `${input.reason ?? 'No reason provided'} (via AI, instructed by ${auth.authorizedBy})`;
+  const reason = `${input.reason ?? 'No reason provided'} (via AI, instructed by ${auth.authorizedBy})`;
+  return executeModeration(ctx, input, auth, 'ban', reason, async () => {
     const options = { reason };
     if (input.delete_message_seconds != null) options.delete_message_seconds = input.delete_message_seconds;
     await ctx.client.banMember(auth.guildId, input.user_id, options);
-    await recordModeration(ctx.client, {
-      guildId: auth.guildId,
-      action: 'ban',
-      caseType: 'ban',
-      userId: input.user_id,
-      moderatorId: auth.authorizedBy,
-      reason,
-    });
-    return JSON.stringify({ ok: true });
-  } catch (err) {
-    return JSON.stringify({ ok: false, error: formatToolError(err) });
-  }
+  });
 }

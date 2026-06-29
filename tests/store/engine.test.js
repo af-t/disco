@@ -232,25 +232,35 @@ describe('StoreEngine disk demote + get promotion', () => {
       await fs.rm(diskPath, { recursive: true, force: true });
     }
   });
+});
 
+async function setupEngineWithWriteError(prefix) {
+  const diskPath = join(os.tmpdir(), prefix + '_' + Date.now());
+  const engine = new Engine({ diskPath });
+  await engine.ready();
+  await engine.set('k', 'v');
+  mock.method(fs, 'writeFile', async () => {
+    throw new Error('disk full');
+  });
+  return { engine, diskPath };
+}
+
+async function cleanupEngineMock(engine, diskPath) {
+  mock.restoreAll();
+  engine._active = false;
+  engine._notifier?.();
+  await fs.rm(diskPath, { recursive: true, force: true });
+}
+
+describe('StoreEngine _demote error handling', () => {
   it('_demote error increments diskWrite stat', async () => {
-    const diskPath = join(os.tmpdir(), 'engine_demote_err_' + Date.now());
-    const engine = new Engine({ diskPath });
-    await engine.ready();
+    const { engine, diskPath } = await setupEngineWithWriteError('engine_demote_err');
     try {
-      await engine.set('k', 'v');
-      // Mock writeFile to fail
-      mock.method(fs, 'writeFile', async () => {
-        throw new Error('disk full');
-      });
       await engine._demote('k');
       assert.strictEqual(engine._stats.errors.diskWrite, 1);
       assert.strictEqual(engine._metadata.get('k').location, 0); // stayed MEMORY
     } finally {
-      mock.restoreAll();
-      engine._active = false;
-      engine._notifier?.();
-      await fs.rm(diskPath, { recursive: true, force: true });
+      await cleanupEngineMock(engine, diskPath);
     }
   });
 });
@@ -466,15 +476,8 @@ describe('StoreEngine _saveMetadata error is swallowed', () => {
   afterEach(() => mock.restoreAll());
 
   it('logs error when metadata writeFile fails', async () => {
-    const diskPath = join(os.tmpdir(), 'engine_savemeta_' + Date.now());
-    const engine = new Engine({ diskPath });
-    await engine.ready();
+    const { engine, diskPath } = await setupEngineWithWriteError('engine_savemeta');
     try {
-      await engine.set('k', 'v');
-      // Make writeFile fail during close/_saveMetadata
-      mock.method(fs, 'writeFile', async () => {
-        throw new Error('disk full');
-      });
       const result = await engine.close();
       // close() should complete without throwing even if metadata save fails
       assert.ok(result === true || result === undefined);

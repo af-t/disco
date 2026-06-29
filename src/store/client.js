@@ -1,11 +1,8 @@
 import { serialize, deserialize } from 'node:v8';
-import StoreBase from './base.js';
+import StoreBase, { ACTION, LOCATION } from './base.js';
 import utility from '../lib/utility.js';
 
 const { unrefTimeout } = utility;
-
-const ACTION = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3, HAS: 4, METADATA: 5, ATTR_SET: 6, ATTR_GET: 7 });
-const LOCATION = Object.freeze({ MEMORY: 0, SERVER: 1 });
 
 class StoreClient extends StoreBase {
   // WebSocket-specific state
@@ -88,47 +85,6 @@ class StoreClient extends StoreBase {
 
   // --- API StoreClient ---
 
-  /**
-   * Store a value.
-   * @param {string}  key
-   * @param {*}       data
-   * @param {boolean|object} [options=false]  true → item gets serverTTL when demoted;
-   *                                          false → item lives on server until deleted;
-   *                                          object → { isCache: boolean, ttl: number }
-   */
-  async set(key, data, options = false) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    this._stats.operations.set++;
-    return this._addAction(ACTION.SET, key, data, options);
-  }
-
-  async get(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    this._stats.operations.get++;
-    return this._addAction(ACTION.GET, key);
-  }
-
-  async delete(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    this._stats.operations.delete++;
-    return this._addAction(ACTION.DELETE, key);
-  }
-
-  async clear() {
-    this._stats.operations.clear++;
-    return this._addAction(ACTION.CLEAR);
-  }
-
-  async has(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    return this._addAction(ACTION.HAS, key);
-  }
-
-  async metadata(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    return this._addAction(ACTION.METADATA, key);
-  }
-
   async setAttr(key, value) {
     return this._addAction(ACTION.ATTR_SET, key, value);
   }
@@ -140,78 +96,21 @@ class StoreClient extends StoreBase {
   // --- Stats (client-specific: uses itemsOnServer + connected) ---
 
   async getStats() {
-    let itemsInMemory = 0;
-    let itemsOnServer = 0;
-    let dataBytes = 0;
-    for (const m of this._metadata.values()) {
-      if (m.location === LOCATION.MEMORY) {
-        itemsInMemory++;
-        if (m.dataSizeV8 > 0) dataBytes += m.dataSizeV8;
-      } else {
-        itemsOnServer++;
-      }
-    }
-
-    const metaBytes = this._metadata.size > 0 ? serialize(this._metadata).length : 0;
-    const totalBytes = dataBytes + metaBytes;
-
-    const totalCacheOps = this._stats.cache.hits + this._stats.cache.misses;
-    const hitRate = totalCacheOps > 0 ? ((this._stats.cache.hits / totalCacheOps) * 100).toFixed(2) : '0.00';
-
-    const uptime = Date.now() - this._stats.lifecycle.startTime;
-
-    return {
-      uptime: this._formatDuration(uptime),
-      uptimeMs: uptime,
-      connected: this._ws?.readyState === this._WebSocketImpl.OPEN,
-      operations: {
-        ...this._stats.operations,
-        total: Object.values(this._stats.operations).reduce((a, b) => a + b, 0),
-      },
-      cache: {
-        ...this._stats.cache,
-        hitRate: `${hitRate}%`,
-        hitRateNumeric: parseFloat(hitRate),
-      },
-      storage: {
-        totalItems: this._metadata.size,
-        itemsInMemory,
-        itemsOnServer,
-        memoryUsage: {
-          metadata: this._formatBytes(metaBytes),
-          data: this._formatBytes(dataBytes),
-          total: this._formatBytes(totalBytes),
-        },
-        memoryUsageBytes: { metadata: metaBytes, data: dataBytes, total: totalBytes },
-        maxMemory: this._formatBytes(this.maxMemory),
-        memoryUtilization: `${((totalBytes / this.maxMemory) * 100).toFixed(2)}%`,
-      },
-      queue: {
-        current: this._queues.length,
-        avg: this._queueLenSamples > 0 ? (this._queueLenSum / this._queueLenSamples).toFixed(2) : '0.00',
-        max: this._stats.performance.maxQueueLength,
-      },
-      maintenance: {
-        cycles: this._stats.performance.maintenanceCycles,
-        lastDuration: `${this._stats.performance.lastMaintenanceDuration}ms`,
-      },
-      errors: {
-        ...this._stats.errors,
-        total: Object.values(this._stats.errors).reduce((a, b) => a + b, 0),
-      },
-    };
+    const stats = await super.getStats();
+    stats.connected = this._ws?.readyState === this._WebSocketImpl.OPEN;
+    stats.storage.itemsOnServer = stats.storage.itemsOnBackend;
+    delete stats.storage.itemsOnBackend;
+    return stats;
   }
 
   // --- Stats factory (client-specific error fields) ---
 
   _makeStats() {
-    return {
-      operations: { get: 0, set: 0, delete: 0, clear: 0 },
-      cache: { hits: 0, misses: 0, promotions: 0, demotions: 0 },
-      errors: { serverRead: 0, serverWrite: 0, serialize: 0, queue: 0 },
-      performance: { maxQueueLength: 0, maintenanceCycles: 0, lastMaintenanceDuration: 0 },
-      lifecycle: { startTime: Date.now() },
-    };
+    const stats = super._makeStats();
+    stats.errors.serverRead = 0;
+    stats.errors.serverWrite = 0;
+    stats.errors.serialize = 0;
+    return stats;
   }
 
   // --- Allow ATTR actions even when store is inactive ---
@@ -234,17 +133,7 @@ class StoreClient extends StoreBase {
     switch (action) {
       case ACTION.CLEAR:
         return async () => {
-          if (this.onDelete) {
-            for (const [k, m] of this._metadata.entries()) {
-              try {
-                await this.onDelete(k, m);
-              } catch {
-                // ignore
-              }
-            }
-          }
-          this._metadata.clear();
-          this._data.clear();
+          await this._executeClear();
           try {
             await this._send('clear');
           } catch {
@@ -269,27 +158,7 @@ class StoreClient extends StoreBase {
             expired: customTTL ? Date.now() + customTTL : Date.now() + this.memoryTTL,
           };
 
-          meta.accessCount = 0;
-          meta.location = LOCATION.MEMORY;
-          if (customTTL !== null) {
-            meta.customTTL = customTTL;
-            meta.expired = Date.now() + customTTL;
-          }
-
-          try {
-            meta.dataSizeV8 = serialize(data).length;
-          } catch (err) {
-            this._stats.errors.serialize++;
-            this._log('error', 'serialize failed for key', key, err);
-            return;
-          }
-
-          meta.lastAccess = Date.now();
-          if (customTTL === null) {
-            meta.expired = Date.now() + this.memoryTTL;
-          }
-          this._data.set(key, data);
-          this._metadata.set(key, meta);
+          this._updateMemoryMeta(key, data, meta, customTTL);
         };
 
       case ACTION.GET:
@@ -357,20 +226,8 @@ class StoreClient extends StoreBase {
           return;
         };
 
-      case ACTION.DELETE:
-        return async () => {
-          await this._delete(key);
-        };
-
-      case ACTION.HAS:
-        return async () => {
-          return this._metadata.has(key);
-        };
-
-      case ACTION.METADATA:
-        return async () => {
-          return Object.assign({}, this._metadata.get(key) || {});
-        };
+      default:
+        return super._createTask(action, key, data, options);
 
       case ACTION.ATTR_SET:
         return async () => {
@@ -390,9 +247,6 @@ class StoreClient extends StoreBase {
             return;
           }
         };
-
-      default:
-        throw new Error(`Unknown action: ${action}`);
     }
   }
 

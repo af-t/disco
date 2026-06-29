@@ -1,10 +1,12 @@
+import tools from '../lib/utility.js';
+const { getLogChannel } = tools;
+
 export default async (client, m) => {
   if (!m.guild_id) return;
 
   const cached = await client.store.get(`${m.channel_id}:${m.id}`);
   if (cached && !cached.author.bot) {
-    const channels = await client.getChannels(m.guild_id);
-    const logChannel = channels.find((x) => x.name === 'logs' || x.name === 'audit-log');
+    const logChannel = await getLogChannel(client, m.guild_id);
     if (!logChannel) return;
 
     const embed = {

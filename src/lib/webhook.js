@@ -151,30 +151,24 @@ class DiscordWebhookTools {
         });
       });
 
+      const handleFailure = (err) => {
+        if (retryCount < DiscordWebhookTools.MAX_RETRIES) {
+          unrefTimeout(() => {
+            this.sendRawRequest(data, options, retryCount + 1)
+              .then(resolve)
+              .catch(reject);
+          }, DiscordWebhookTools.RETRY_DELAY);
+        } else {
+          reject(err);
+        }
+      };
+
       req.on('timeout', () => {
         req.destroy();
-        if (retryCount < DiscordWebhookTools.MAX_RETRIES) {
-          unrefTimeout(() => {
-            this.sendRawRequest(data, options, retryCount + 1)
-              .then(resolve)
-              .catch(reject);
-          }, DiscordWebhookTools.RETRY_DELAY);
-        } else {
-          reject(new Error('Request timeout'));
-        }
+        handleFailure(new Error('Request timeout'));
       });
 
-      req.on('error', (error) => {
-        if (retryCount < DiscordWebhookTools.MAX_RETRIES) {
-          unrefTimeout(() => {
-            this.sendRawRequest(data, options, retryCount + 1)
-              .then(resolve)
-              .catch(reject);
-          }, DiscordWebhookTools.RETRY_DELAY);
-        } else {
-          reject(error);
-        }
-      });
+      req.on('error', handleFailure);
 
       if (data) {
         req.write(JSON.stringify(data));

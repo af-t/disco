@@ -1,12 +1,6 @@
 import { createCase } from '../../lib/case.js';
 import { postModLog } from '../../lib/modlog.js';
-
-function extractUserID(input) {
-  if (!input || typeof input !== 'string') return;
-  let id = input.match(/<@!?(\d+)>/)?.[1];
-  if (!id && !isNaN(Number(input))) id = input;
-  if (id?.length > 15) return id;
-}
+import { extractUserID } from './adminUtils.js';
 
 const execute = async (client, message, args) => {
   let memberId = extractUserID(args[0]);

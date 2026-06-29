@@ -1,5 +1,6 @@
 import { createCase } from '../../lib/case.js';
 import { postModLog } from '../../lib/modlog.js';
+import { extractUserID } from './adminUtils.js';
 
 // Time conversation units
 const TIME_UNITS = {
@@ -7,7 +8,7 @@ const TIME_UNITS = {
   m: 1000 * 60,
   h: 1000 * 60 * 60,
   d: 1000 * 60 * 60 * 24,
-  w: 1000 * 60 * 60 * 24 * 7,
+  w: 1000 * 60 * 24 * 7,
   M: 1000 * 60 * 60 * 24 * 30,
   y: 1000 * 60 * 60 * 24 * 365,
   ms: 1,
@@ -21,13 +22,6 @@ function parseDuration(duration) {
   const multiplier = TIME_UNITS[unit];
   if (!multiplier) return;
   return Number(value) * multiplier;
-}
-
-function extractUserID(input) {
-  if (!input || typeof input !== 'string') return;
-  let id = input.match(/<@!?(\d+)>/)?.[1];
-  if (!id && !isNaN(Number(input))) id = input;
-  if (id?.length > 15) return id;
 }
 
 const execute = async (client, message, args) => {

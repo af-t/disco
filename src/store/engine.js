@@ -4,10 +4,7 @@ import v8 from 'node:v8';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
-import StoreBase from './base.js';
-
-const ACTION = Object.freeze({ CLEAR: 0, SET: 1, GET: 2, DELETE: 3, HAS: 4, METADATA: 5 });
-const LOCATION = Object.freeze({ MEMORY: 0, DISK: 1 });
+import StoreBase, { ACTION, LOCATION } from './base.js';
 
 class StoreManager extends StoreBase {
   /**
@@ -62,126 +59,23 @@ class StoreManager extends StoreBase {
     return true;
   }
 
-  /**
-   * Store a value.
-   * @param {string}  key
-   * @param {*}       data
-   * @param {boolean|object} [options=false]  true → item gets diskTTL when demoted;
-   *                                          false → item lives on disk until deleted;
-   *                                          object → { isCache: boolean, ttl: number }
-   */
-  async set(key, data, options = false) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    this._stats.operations.set++;
-    return this._addAction(ACTION.SET, key, data, options);
-  }
-
-  /** Retrieve a value (or undefined if missing / expired). */
-  async get(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    this._stats.operations.get++;
-    return this._addAction(ACTION.GET, key);
-  }
-
-  /** Delete a single key. */
-  async delete(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    this._stats.operations.delete++;
-    return this._addAction(ACTION.DELETE, key);
-  }
-
-  /** Remove all keys and wipe the disk directory. */
-  async clear() {
-    this._stats.operations.clear++;
-    return this._addAction(ACTION.CLEAR);
-  }
-
-  /** Returns true if the key exists (even if the value is on disk). */
-  async has(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    return this._addAction(ACTION.HAS, key);
-  }
-
-  /** Shallow copy of the metadata entry for `key`, or {} if not found. */
-  async metadata(key) {
-    if (typeof key !== 'string') throw new TypeError('key must be a string');
-    return this._addAction(ACTION.METADATA, key);
-  }
-
   // --- Stats (engine-specific: uses itemsOnDisk) ---
 
   async getStats() {
-    let itemsInMemory = 0;
-    let itemsOnDisk = 0;
-    let dataBytes = 0;
-    for (const m of this._metadata.values()) {
-      if (m.location === LOCATION.MEMORY) {
-        itemsInMemory++;
-        if (m.dataSizeV8 > 0) dataBytes += m.dataSizeV8;
-      } else {
-        itemsOnDisk++;
-      }
-    }
-
-    const metaBytes = this._metadata.size > 0 ? serialize(this._metadata).length : 0;
-    const totalBytes = dataBytes + metaBytes;
-
-    const totalCacheOps = this._stats.cache.hits + this._stats.cache.misses;
-    const hitRate = totalCacheOps > 0 ? ((this._stats.cache.hits / totalCacheOps) * 100).toFixed(2) : '0.00';
-
-    const uptime = Date.now() - this._stats.lifecycle.startTime;
-
-    return {
-      uptime: this._formatDuration(uptime),
-      uptimeMs: uptime,
-      operations: {
-        ...this._stats.operations,
-        total: Object.values(this._stats.operations).reduce((a, b) => a + b, 0),
-      },
-      cache: {
-        ...this._stats.cache,
-        hitRate: `${hitRate}%`,
-        hitRateNumeric: parseFloat(hitRate),
-      },
-      storage: {
-        totalItems: this._metadata.size,
-        itemsInMemory,
-        itemsOnDisk,
-        memoryUsage: {
-          metadata: this._formatBytes(metaBytes),
-          data: this._formatBytes(dataBytes),
-          total: this._formatBytes(totalBytes),
-        },
-        memoryUsageBytes: { metadata: metaBytes, data: dataBytes, total: totalBytes },
-        maxMemory: this._formatBytes(this.maxMemory),
-        memoryUtilization: `${((totalBytes / this.maxMemory) * 100).toFixed(2)}%`,
-      },
-      queue: {
-        current: this._queues.length,
-        avg: this._queueLenSamples > 0 ? (this._queueLenSum / this._queueLenSamples).toFixed(2) : '0.00',
-        max: this._stats.performance.maxQueueLength,
-      },
-      maintenance: {
-        cycles: this._stats.performance.maintenanceCycles,
-        lastDuration: `${this._stats.performance.lastMaintenanceDuration}ms`,
-      },
-      errors: {
-        ...this._stats.errors,
-        total: Object.values(this._stats.errors).reduce((a, b) => a + b, 0),
-      },
-    };
+    const stats = await super.getStats();
+    stats.storage.itemsOnDisk = stats.storage.itemsOnBackend;
+    delete stats.storage.itemsOnBackend;
+    return stats;
   }
 
   // --- Stats factory (engine-specific error fields) ---
 
   _makeStats() {
-    return {
-      operations: { get: 0, set: 0, delete: 0, clear: 0 },
-      cache: { hits: 0, misses: 0, promotions: 0, demotions: 0 },
-      errors: { diskRead: 0, diskWrite: 0, serialize: 0, queue: 0 },
-      performance: { maxQueueLength: 0, maintenanceCycles: 0, lastMaintenanceDuration: 0 },
-      lifecycle: { startTime: Date.now() },
-    };
+    const stats = super._makeStats();
+    stats.errors.diskRead = 0;
+    stats.errors.diskWrite = 0;
+    stats.errors.serialize = 0;
+    return stats;
   }
 
   // --- Task factory (engine-specific: disk I/O) ---
@@ -198,18 +92,8 @@ class StoreManager extends StoreBase {
     switch (action) {
       case ACTION.CLEAR:
         return async () => {
-          if (this.onDelete) {
-            for (const [k, m] of this._metadata.entries()) {
-              try {
-                await this.onDelete(k, m);
-              } catch {
-                // ignore
-              }
-            }
-          }
-          this._metadata.clear();
+          await this._executeClear();
           this._dirty = true;
-          this._data.clear();
           if (this.diskPath) {
             await fs.rm(this.diskPath, { force: true, recursive: true });
             await fs.mkdir(this.diskPath, { recursive: true });
@@ -233,37 +117,14 @@ class StoreManager extends StoreBase {
             expired: customTTL ? Date.now() + customTTL : Date.now() + this.memoryTTL,
           };
 
-          meta.accessCount = 0;
-          if (customTTL !== null) {
-            meta.customTTL = customTTL;
-            meta.expired = Date.now() + customTTL;
-          }
-
-          // Remove stale disk file if key was previously demoted
           if (meta.location === LOCATION.DISK) {
             try {
               await fs.rm(meta.locationFile);
-            } catch {
-              // file may already be gone
-            }
-            meta.location = LOCATION.MEMORY;
+            } catch {}
           }
-
-          try {
-            meta.dataSizeV8 = serialize(data).length;
-          } catch (err) {
-            this._stats.errors.serialize++;
-            this._log('error', 'serialize failed for key', key, err);
-            return;
+          if (this._updateMemoryMeta(key, data, meta, customTTL)) {
+            this._dirty = true;
           }
-
-          meta.lastAccess = Date.now();
-          if (customTTL === null) {
-            meta.expired = Date.now() + this.memoryTTL;
-          }
-          this._data.set(key, data);
-          this._metadata.set(key, meta);
-          this._dirty = true;
         };
 
       case ACTION.GET:
@@ -336,23 +197,8 @@ class StoreManager extends StoreBase {
           return this._data.get(key);
         };
 
-      case ACTION.DELETE:
-        return async () => {
-          await this._delete(key);
-        };
-
-      case ACTION.HAS:
-        return async () => {
-          return this._metadata.has(key);
-        };
-
-      case ACTION.METADATA:
-        return async () => {
-          return Object.assign({}, this._metadata.get(key) || {});
-        };
-
       default:
-        throw new Error(`Unknown action: ${action}`);
+        return super._createTask(action, key, data, options);
     }
   }
 

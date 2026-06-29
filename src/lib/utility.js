@@ -216,6 +216,12 @@ function formatAgo(since) {
   return `${seconds}s ago`;
 }
 
+function getAvatarUrl(user) {
+  return user.avatar
+    ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=1024`
+    : `https://cdn.discordapp.com/embed/avatars/${user.discriminator && user.discriminator !== '0' ? Number(user.discriminator) % 5 : Number((BigInt(user.id) >> 22n) % 6n)}.png`;
+}
+
 async function getPermissions(client, guild_id, member) {
   const guildRoles = await client.getRoles(guild_id);
   if (!guildRoles) return 0n;
@@ -230,6 +236,11 @@ async function getPermissions(client, guild_id, member) {
     }
   }
   return perms;
+}
+
+async function getLogChannel(client, guildId) {
+  const channels = await client.getChannels(guildId);
+  return channels.find((x) => x.name === 'logs' || x.name === 'audit-log');
 }
 
 function unrefTimeout(fn, delay) {
@@ -257,6 +268,8 @@ export default {
   deploySlashCommands,
   Logger,
   formatAgo,
+  getAvatarUrl,
+  getLogChannel,
   getPermissions,
   unrefTimeout,
   unrefInterval,

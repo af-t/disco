@@ -94,25 +94,10 @@ describe('DiscordWebhookTools sendEmbed', () => {
   afterEach(() => mock.restoreAll());
 
   it('sends embeds array', async () => {
-    let body;
-    mock.method(https, 'request', (options, callback) => {
-      const req = new EventEmitter();
-      req.write = (data) => {
-        body = JSON.parse(data);
-      };
-      req.destroy = () => {};
-      req.end = () =>
-        setImmediate(() => {
-          const res = new EventEmitter();
-          res.statusCode = 200;
-          res.headers = {};
-          callback(res);
-          res.emit('data', Buffer.from('{}'));
-          res.emit('end');
-        });
-      return req;
-    });
+    const captured = [];
+    mock.method(https, 'request', createCapturedMockRequest('{}', captured));
     await new DiscordWebhookTools(VALID_URL).sendEmbed({ title: 'Test' });
+    const body = captured[0];
     assert.deepStrictEqual(body.embeds, [{ title: 'Test' }]);
   });
 });
@@ -153,26 +138,24 @@ describe('DiscordWebhookTools sendRawRequest 429 retry', () => {
   afterEach(() => mock.restoreAll());
 
   it('retries once on 429 then succeeds', async () => {
-    let calls = 0;
-    mock.method(https, 'request', (options, callback) => {
-      const req = new EventEmitter();
-      req.write = () => {};
-      req.destroy = () => {};
-      req.end = () =>
+    createRetryMockRequest.calls = 0;
+    mock.method(
+      https,
+      'request',
+      createRetryMockRequest((req, callback) => {
         setImmediate(() => {
           const res = new EventEmitter();
-          calls++;
-          res.statusCode = calls === 1 ? 429 : 200;
+          res.statusCode = 429;
           res.headers = { 'retry-after': '1', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '0' };
           callback(res);
           res.emit('data', Buffer.from('{}'));
           res.emit('end');
         });
-      return req;
-    });
+      }),
+    );
     const result = await new DiscordWebhookTools(VALID_URL).sendMessage('x');
     assert.deepStrictEqual(result, {});
-    assert.strictEqual(calls, 2);
+    assert.strictEqual(createRetryMockRequest.calls, 2);
   });
 
   it('rejects after MAX_RETRIES 429s', async () => {
@@ -191,31 +174,17 @@ describe('DiscordWebhookTools sendRawRequest network error', () => {
   });
 
   it('retries on network error and succeeds', async () => {
-    let calls = 0;
-    mock.method(https, 'request', (options, callback) => {
-      const req = new EventEmitter();
-      req.write = () => {};
-      req.destroy = () => {};
-      req.end = () => {
-        calls++;
-        if (calls === 1) {
-          setImmediate(() => req.emit('error', new Error('ECONNRESET')));
-        } else {
-          setImmediate(() => {
-            const res = new EventEmitter();
-            res.statusCode = 200;
-            res.headers = {};
-            callback(res);
-            res.emit('data', Buffer.from('{}'));
-            res.emit('end');
-          });
-        }
-      };
-      return req;
-    });
+    createRetryMockRequest.calls = 0;
+    mock.method(
+      https,
+      'request',
+      createRetryMockRequest((req) => {
+        setImmediate(() => req.emit('error', new Error('ECONNRESET')));
+      }),
+    );
     const result = await new DiscordWebhookTools(VALID_URL).sendMessage('x');
     assert.deepStrictEqual(result, {});
-    assert.strictEqual(calls, 2);
+    assert.strictEqual(createRetryMockRequest.calls, 2);
   });
 });
 
@@ -300,27 +269,76 @@ describe('DiscordWebhookTools signature', () => {
   });
 });
 
+function createMockRequest(responseData) {
+  return (options, callback) => {
+    const req = new EventEmitter();
+    req.write = () => true;
+    req.destroy = () => {};
+    req.end = () =>
+      setImmediate(() => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        res.headers = {};
+        callback(res);
+        res.emit('data', Buffer.from(responseData));
+        res.emit('end');
+      });
+    return req;
+  };
+}
+
+function createCapturedMockRequest(responseData, captureArray) {
+  return (options, callback) => {
+    const req = new EventEmitter();
+    req.write = (data) => {
+      captureArray.push(JSON.parse(data));
+    };
+    req.destroy = () => {};
+    req.end = () =>
+      setImmediate(() => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        res.headers = {};
+        callback(res);
+        res.emit('data', Buffer.from(responseData));
+        res.emit('end');
+      });
+    return req;
+  };
+}
+
+function createRetryMockRequest(firstAction) {
+  return (options, callback) => {
+    if (!createRetryMockRequest.calls) createRetryMockRequest.calls = 0;
+    const req = new EventEmitter();
+    req.write = () => {};
+    req.destroy = () => {};
+    req.end = () => {
+      createRetryMockRequest.calls++;
+      if (createRetryMockRequest.calls === 1) {
+        firstAction(req, callback);
+      } else {
+        setImmediate(() => {
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          res.headers = {};
+          callback(res);
+          res.emit('data', Buffer.from('{}'));
+          res.emit('end');
+        });
+      }
+    };
+    return req;
+  };
+}
+
 describe('DiscordWebhookTools sendFile extra coverage', () => {
   afterEach(() => mock.restoreAll());
 
   it('uploads a file referenced by a filesystem path', async () => {
     const tmp = path.join(os.tmpdir(), 'wh-file-' + Date.now() + '.txt');
     fs.writeFileSync(tmp, 'disk-file-content');
-    mock.method(https, 'request', (options, callback) => {
-      const req = new EventEmitter();
-      req.write = () => true;
-      req.destroy = () => {};
-      req.end = () =>
-        setImmediate(() => {
-          const res = new EventEmitter();
-          res.statusCode = 200;
-          res.headers = {};
-          callback(res);
-          res.emit('data', Buffer.from('{"id":"f1"}'));
-          res.emit('end');
-        });
-      return req;
-    });
+    mock.method(https, 'request', createMockRequest('{"id":"f1"}'));
     try {
       const results = await new DiscordWebhookTools(VALID_URL).sendFile([tmp]);
       assert.ok(Array.isArray(results));
@@ -330,21 +348,7 @@ describe('DiscordWebhookTools sendFile extra coverage', () => {
   });
 
   it('recurses for batches larger than 10 files', async () => {
-    mock.method(https, 'request', (options, callback) => {
-      const req = new EventEmitter();
-      req.write = () => true;
-      req.destroy = () => {};
-      req.end = () =>
-        setImmediate(() => {
-          const res = new EventEmitter();
-          res.statusCode = 200;
-          res.headers = {};
-          callback(res);
-          res.emit('data', Buffer.from('{}'));
-          res.emit('end');
-        });
-      return req;
-    });
+    mock.method(https, 'request', createMockRequest('{}'));
     const files = [];
     for (let i = 0; i < 12; i++) files.push({ filename: `f${i}.txt`, data: Buffer.from('x') });
     const results = await new DiscordWebhookTools(VALID_URL).sendFile(files);
@@ -352,21 +356,7 @@ describe('DiscordWebhookTools sendFile extra coverage', () => {
   });
 
   it('pushes the raw string when a file response is not JSON', async () => {
-    mock.method(https, 'request', (options, callback) => {
-      const req = new EventEmitter();
-      req.write = () => true;
-      req.destroy = () => {};
-      req.end = () =>
-        setImmediate(() => {
-          const res = new EventEmitter();
-          res.statusCode = 200;
-          res.headers = {};
-          callback(res);
-          res.emit('data', Buffer.from('not-json-here'));
-          res.emit('end');
-        });
-      return req;
-    });
+    mock.method(https, 'request', createMockRequest('not-json-here'));
     const results = await new DiscordWebhookTools(VALID_URL).sendFile([{ filename: 'a.txt', data: Buffer.from('x') }]);
     assert.ok(results.includes('not-json-here'));
   });

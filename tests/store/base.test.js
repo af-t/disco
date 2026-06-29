@@ -1,12 +1,12 @@
 import { describe, it, mock, afterEach, before } from 'node:test';
 import assert from 'node:assert/strict';
-import StoreBase from '../../src/store/base.js';
+import StoreBase, { ACTION } from '../../src/store/base.js';
 
 // Minimal concrete subclass — only implements the abstract surface
 class ConcreteStore extends StoreBase {
   _createTask(action, key, data) {
     return async () => {
-      if (action === 'SET') {
+      if (action === ACTION.SET) {
         const meta = {
           location: 0,
           dataSizeV8: 10,
@@ -21,14 +21,14 @@ class ConcreteStore extends StoreBase {
         this._data.set(key, data);
         return data;
       }
-      if (action === 'GET') return this._data.get(key);
-      if (action === 'DELETE') await this._delete(key);
-      if (action === 'CLEAR') {
+      if (action === ACTION.GET) return this._data.get(key);
+      if (action === ACTION.DELETE) await this._delete(key);
+      if (action === ACTION.CLEAR) {
         this._metadata.clear();
         this._data.clear();
       }
-      if (action === 'HAS') return this._metadata.has(key);
-      if (action === 'METADATA') return Object.assign({}, this._metadata.get(key) || {});
+      if (action === ACTION.HAS) return this._metadata.has(key);
+      if (action === ACTION.METADATA) return Object.assign({}, this._metadata.get(key) || {});
     };
   }
   async _demote(key) {
@@ -46,25 +46,9 @@ class ConcreteStore extends StoreBase {
 
 // ── Abstract method stubs ────────────────────────────────────────────────────
 describe('StoreBase abstract methods', () => {
-  it('set throws Not implemented', async () => {
-    const b = new StoreBase();
-    await assert.rejects(() => b.set('k', 'v'), { message: 'Not implemented' });
-  });
-  it('get throws Not implemented', async () => {
-    const b = new StoreBase();
-    await assert.rejects(() => b.get('k'), { message: 'Not implemented' });
-  });
-  it('delete throws Not implemented', async () => {
-    const b = new StoreBase();
-    await assert.rejects(() => b.delete('k'), { message: 'Not implemented' });
-  });
-  it('clear throws Not implemented', async () => {
-    const b = new StoreBase();
-    await assert.rejects(() => b.clear(), { message: 'Not implemented' });
-  });
   it('_createTask throws in base', () => {
     const b = new StoreBase();
-    assert.throws(() => b._createTask('SET'), /_createTask not implemented/);
+    assert.throws(() => b._createTask(ACTION.SET), /Unknown action/);
   });
   it('_demote throws in base', async () => {
     const b = new StoreBase();
@@ -165,8 +149,8 @@ describe('StoreBase getStats', () => {
 describe('StoreBase _isAlwaysAllowed', () => {
   it('returns false for any action in base', () => {
     const s = new ConcreteStore();
-    assert.strictEqual(s._isAlwaysAllowed('SET'), false);
-    assert.strictEqual(s._isAlwaysAllowed('GET'), false);
+    assert.strictEqual(s._isAlwaysAllowed(ACTION.SET), false);
+    assert.strictEqual(s._isAlwaysAllowed(ACTION.GET), false);
   });
 });
 
@@ -180,7 +164,7 @@ describe('StoreBase has and metadata', () => {
     const s = new ConcreteStore();
     s._active = true;
     s._startQueueWorker();
-    await s._addAction('SET', 'k', 'v');
+    await s._addAction(ACTION.SET, 'k', 'v');
     const result = await s.has('k');
     assert.strictEqual(result, true);
     s._active = false;
@@ -203,7 +187,7 @@ describe('StoreBase has and metadata', () => {
     const s = new ConcreteStore();
     s._active = true;
     s._startQueueWorker();
-    await s._addAction('SET', 'k', 'v');
+    await s._addAction(ACTION.SET, 'k', 'v');
     const meta = await s.metadata('k');
     assert.ok(typeof meta === 'object');
     s._active = false;
@@ -216,7 +200,7 @@ describe('StoreBase _addAction', () => {
   it('resolves immediately when _active=false', async () => {
     const s = new ConcreteStore();
     // _active is false by default
-    const result = await s._addAction('GET', 'k');
+    const result = await s._addAction(ACTION.GET, 'k');
     assert.strictEqual(result, undefined);
   });
 
@@ -224,8 +208,8 @@ describe('StoreBase _addAction', () => {
     const s = new ConcreteStore();
     s._active = true;
     s._startQueueWorker();
-    await s._addAction('SET', 'k', 'v');
-    const result = await s._addAction('GET', 'k');
+    await s._addAction(ACTION.SET, 'k', 'v');
+    const result = await s._addAction(ACTION.GET, 'k');
     assert.strictEqual(result, 'v');
     s._active = false;
     s._notifier?.();
@@ -238,7 +222,7 @@ describe('StoreBase _addAction', () => {
     s._createTask = () => async () => {
       throw new Error('boom');
     };
-    const result = await s._addAction('SET', 'k');
+    const result = await s._addAction(ACTION.SET, 'k');
     assert.strictEqual(result, undefined);
     assert.strictEqual(s._stats.errors.queue, 1);
     s._active = false;
@@ -356,9 +340,24 @@ describe('StoreBase _startQueueWorker', () => {
 // ── _startMaintainer ─────────────────────────────────────────────────────────
 describe('StoreBase _startMaintainer', () => {
   afterEach(() => {
-    mock.restoreAll();
     mock.timers.reset();
+    mock.restoreAll();
   });
+
+  async function runMaintainerCycle(s, spy) {
+    s._startMaintainer();
+    mock.timers.tick(16_000);
+
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    assert.strictEqual(spy.mock.callCount(), 1);
+
+    s._active = false;
+    s._notifier?.();
+    mock.timers.tick(16_000);
+  }
 
   it('demotes expired MEMORY items after 15s', async () => {
     mock.timers.enable({ apis: ['setTimeout'] });
@@ -378,18 +377,7 @@ describe('StoreBase _startMaintainer', () => {
     });
     s._data.set('old', 'v');
 
-    s._startMaintainer();
-    mock.timers.tick(16_000);
-
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-
-    assert.strictEqual(demoteSpy.mock.callCount(), 1);
-
-    s._active = false;
-    s._notifier?.();
-    mock.timers.tick(16_000); // wake maintainer from next sleep
+    await runMaintainerCycle(s, demoteSpy);
   });
 
   it('deletes expired SERVER items after 15s', async () => {
@@ -408,18 +396,7 @@ describe('StoreBase _startMaintainer', () => {
       customTTL: null,
     });
 
-    s._startMaintainer();
-    mock.timers.tick(16_000);
-
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-
-    assert.strictEqual(deleteSpy.mock.callCount(), 1);
-
-    s._active = false;
-    s._notifier?.();
-    mock.timers.tick(16_000);
+    await runMaintainerCycle(s, deleteSpy);
   });
 
   it('evicts LRU items when over maxMemory', async () => {
@@ -440,18 +417,7 @@ describe('StoreBase _startMaintainer', () => {
     });
     s._data.set('a', 'v');
 
-    s._startMaintainer();
-    mock.timers.tick(16_000);
-
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-
-    assert.strictEqual(demoteSpy.mock.callCount(), 1);
-
-    s._active = false;
-    s._notifier?.();
-    mock.timers.tick(16_000);
+    await runMaintainerCycle(s, demoteSpy);
   });
 
   it('stops when _active becomes false', async () => {

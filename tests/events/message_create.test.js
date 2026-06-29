@@ -2,6 +2,16 @@ import test, { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert';
 import handleMessage from '../../src/events/message_create.js';
 
+function setupMessageTracking(client) {
+  const sent = [];
+  client.sendMessage = async (cid, content) => {
+    sent.push(typeof content === 'string' ? content : JSON.stringify(content));
+    return { id: 'w' };
+  };
+  client.deleteMessage = async () => {};
+  return sent;
+}
+
 // Use realistic Discord snowflake IDs (numeric strings)
 const BOT_ID = '112233445566778899';
 const USER_001 = '100000000000000001';
@@ -513,12 +523,7 @@ describe('message_create AFK hooks', () => {
     const since = Date.now() - 60_000;
     await client.store.set(`afk:${GUILD_ID}:${USER_001}`, { since, message: 'sleeping' });
 
-    const sent = [];
-    client.sendMessage = async (cid, content) => {
-      sent.push(typeof content === 'string' ? content : JSON.stringify(content));
-      return { id: 'w' };
-    };
-    client.deleteMessage = async () => {};
+    const sent = setupMessageTracking(client);
 
     const m = createMockMessage({ content: 'im back' });
     await handleMessage(client, m);
@@ -535,12 +540,7 @@ describe('message_create AFK hooks', () => {
     const since = Date.now() - 30_000;
     await client.store.set(`afk:${GUILD_ID}:${OTHER_USER}`, { since, message: 'brb' });
 
-    const sent = [];
-    client.sendMessage = async (cid, content) => {
-      sent.push(typeof content === 'string' ? content : JSON.stringify(content));
-      return { id: 'w' };
-    };
-    client.deleteMessage = async () => {};
+    const sent = setupMessageTracking(client);
 
     const m = createMockMessage({ content: `hey <@${OTHER_USER}>` });
     await handleMessage(client, m);
@@ -554,12 +554,7 @@ describe('message_create AFK hooks', () => {
     const client = createMockClient();
     // user is AFK but mentions themselves; notify should not fire for self
     await client.store.set(`afk:${GUILD_ID}:${USER_001}`, { since: Date.now(), message: 'away' });
-    const sent = [];
-    client.sendMessage = async (cid, content) => {
-      sent.push(typeof content === 'string' ? content : JSON.stringify(content));
-      return { id: 'w' };
-    };
-    client.deleteMessage = async () => {};
+    const sent = setupMessageTracking(client);
 
     // message mentions self (USER_001) while USER_001 is AFK
     const m = createMockMessage({ content: `hey <@${USER_001}>` });
@@ -586,12 +581,7 @@ describe('message_create rate limiting', () => {
         unknowncmd: async () => {},
       },
     });
-    const replies = [];
-    client.sendMessage = async (cid, content) => {
-      replies.push(typeof content === 'string' ? content : '');
-      return { id: 'r' };
-    };
-    client.deleteMessage = async () => {};
+    const replies = setupMessageTracking(client);
 
     // fire 6 messages rapidly (DEFAULT = 5/s); 6th triggers rate limit
     for (let i = 0; i < 6; i++) {
@@ -1022,13 +1012,8 @@ describe('message_create extra coverage', () => {
 
   it('drops silently after a rate-limit notice and uses the username fallback', async () => {
     mock.timers.enable({ apis: ['setTimeout'] });
-    const replies = [];
     const client = createMockClient({ hasCommands: { ping: async () => {} } });
-    client.sendMessage = async (cid, content) => {
-      replies.push(typeof content === 'string' ? content : '');
-      return { id: 'r' };
-    };
-    client.deleteMessage = async () => {};
+    const replies = setupMessageTracking(client);
     for (let i = 0; i < 8; i++) {
       await handleMessage(
         client,

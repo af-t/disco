@@ -399,17 +399,20 @@ describe('importCommands duplicate alias warning', () => {
 });
 
 // ── importCommands bad module structure ───────────────────────────────────────
+async function assertImportCommandsEmpty(base, filename, code) {
+  await writeFile(join(base, filename), code);
+  try {
+    const commands = await importCommands(base);
+    assert.deepStrictEqual(Object.keys(commands), []);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+}
 describe('importCommands warns on bad module structure', () => {
   it('warns when module lacks data.name or execute', async () => {
     const base = join(tmpdir(), 'util_bad_' + Date.now());
     await mkdir(base, { recursive: true });
-    await writeFile(join(base, 'notacmd.js'), `export default {};`);
-    try {
-      const commands = await importCommands(base);
-      assert.deepStrictEqual(Object.keys(commands), []);
-    } finally {
-      await rm(base, { recursive: true, force: true });
-    }
+    await assertImportCommandsEmpty(base, 'notacmd.js', `export default {};`);
   });
 });
 
@@ -419,13 +422,7 @@ describe('importCommands handles import error gracefully', () => {
     const base = join(tmpdir(), 'util_err_' + Date.now());
     await mkdir(base, { recursive: true });
     // File that throws at module evaluation time — unique name avoids ESM cache
-    await writeFile(join(base, 'broken.js'), `throw new Error('module init error');`);
-    try {
-      const commands = await importCommands(base);
-      assert.deepStrictEqual(Object.keys(commands), []);
-    } finally {
-      await rm(base, { recursive: true, force: true });
-    }
+    await assertImportCommandsEmpty(base, 'broken.js', `throw new Error('module init error');`);
   });
 });
 
@@ -532,13 +529,7 @@ describe('utility extra coverage', () => {
   it('importCommands warns when a module has no default export', async () => {
     const base = join(tmpdir(), 'util_nodefault_' + Date.now());
     await mkdir(base, { recursive: true });
-    await writeFile(join(base, 'nodef.js'), `export const value = 1;`);
-    try {
-      const commands = await importCommands(base);
-      assert.deepStrictEqual(Object.keys(commands), []);
-    } finally {
-      await rm(base, { recursive: true, force: true });
-    }
+    await assertImportCommandsEmpty(base, 'nodef.js', `export const value = 1;`);
   });
 
   it('importEvents skips subdirectories and no-default files', async () => {

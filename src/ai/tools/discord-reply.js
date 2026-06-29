@@ -1,4 +1,4 @@
-import { formatToolError } from './error.js';
+import { finishSend } from './send-helper.js';
 export const definition = {
   name: 'discord_reply',
   description:
@@ -15,11 +15,5 @@ export const definition = {
 };
 
 export async function execute({ client, runtime }, { channel_id, message_id, content }) {
-  try {
-    const sent = await client.reply({ channel_id, id: message_id }, content);
-    runtime.onBotMessage(sent);
-    return JSON.stringify({ ok: true, message_id: sent.id });
-  } catch (err) {
-    return JSON.stringify({ ok: false, error: formatToolError(err) });
-  }
+  return finishSend(runtime, client.reply({ channel_id, id: message_id }, content));
 }

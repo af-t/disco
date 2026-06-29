@@ -163,103 +163,6 @@ test('should handle subcommands', async () => {
   assert.deepStrictEqual(receivedArgs, ['view', '5'], 'Subcommand should be included in args');
 });
 
-// ─── Permission Check (C1 fix) ───────────────────────────
-
-test('should reject command if user lacks permission', async () => {
-  let executed = false;
-  const client = createMockClient({
-    commands: {
-      ban: {
-        data: { name: 'ban', description: 'Ban user' },
-        permissions: ['BAN_MEMBERS'],
-        execute: async () => {
-          executed = true;
-        },
-      },
-    },
-    guildMember: { roles: ['member_role'] },
-    roles: [{ id: 'member_role', permissions: '0' }], // No permissions
-  });
-
-  const interaction = createMockInteraction({ data: { name: 'ban', options: [] } });
-  await handleInteraction(client, interaction);
-  assert.strictEqual(executed, false, 'Command should not execute without proper permissions');
-});
-
-test('should allow command if user has admin permission', async () => {
-  let executed = false;
-  const client = createMockClient({
-    commands: {
-      ban: {
-        data: { name: 'ban', description: 'Ban user' },
-        permissions: ['BAN_MEMBERS'],
-        execute: async () => {
-          executed = true;
-        },
-      },
-    },
-    guildMember: { roles: ['admin_role'] },
-    roles: [{ id: 'admin_role', permissions: '8' }], // ADMINISTRATOR
-  });
-
-  const interaction = createMockInteraction({
-    data: { name: 'ban', options: [] },
-    member: { user: { id: USER_ID, username: 'Admin' }, roles: ['admin_role'] },
-  });
-  await handleInteraction(client, interaction);
-  assert.strictEqual(executed, true, 'Admin should bypass permission check');
-});
-
-test('should allow command if user has matching permission', async () => {
-  let executed = false;
-  const client = createMockClient({
-    commands: {
-      ban: {
-        data: { name: 'ban', description: 'Ban user' },
-        permissions: ['BAN_MEMBERS'],
-        execute: async () => {
-          executed = true;
-        },
-      },
-    },
-    guildMember: { roles: ['mod_role'] },
-    roles: [{ id: 'mod_role', permissions: '4' }], // BAN_MEMBERS = 1 << 2 = 4
-  });
-
-  const interaction = createMockInteraction({
-    data: { name: 'ban', options: [] },
-    member: { user: { id: USER_ID, username: 'Mod' }, roles: ['mod_role'] },
-  });
-  await handleInteraction(client, interaction);
-  assert.strictEqual(executed, true, 'User with BAN_MEMBERS should execute ban');
-});
-
-// ─── Rate Limiting (M4 fix) ──────────────────────────────
-
-test('should rate limit slash commands', async () => {
-  let executedCount = 0;
-  const client = createMockClient({
-    commands: {
-      ping: {
-        data: { name: 'ping', description: 'Ping' },
-        permissions: [],
-        execute: async () => {
-          executedCount++;
-        },
-      },
-    },
-  });
-
-  const interaction = createMockInteraction({ data: { name: 'ping', options: [] } });
-
-  // 6 rapid invocations — should only execute 5 (DEFAULT rate limit)
-  for (let i = 0; i < 6; i++) {
-    await handleInteraction(client, interaction);
-  }
-
-  assert.strictEqual(executedCount, 5, 'Only 5 commands should execute within rate limit');
-});
-
 // ─── Deferred Response (M5 fix) ──────────────────────────
 
 test('should support deferred response for mock message', async () => {
@@ -524,7 +427,7 @@ describe('interaction_create permission check', () => {
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 describe('interaction_create rate limiting', () => {
-  it('sends rate limit response after DEFAULT threshold', async () => {
+  function setupRateLimitTest() {
     const client = createMockClient({
       commands: {
         ping: { data: { name: 'ping', description: 'x' }, execute: async () => {}, permissions: [] },
@@ -534,6 +437,11 @@ describe('interaction_create rate limiting', () => {
     client.createInteractionResponse = async (id, tok, body) => {
       responses.push(body);
     };
+    return { client, responses };
+  }
+
+  it('sends rate limit response after DEFAULT threshold', async () => {
+    const { client, responses } = setupRateLimitTest();
 
     for (let i = 0; i < 6; i++) {
       await handleInteraction(client, createMockInteraction({ data: { name: 'ping', options: [] } }));
@@ -542,15 +450,7 @@ describe('interaction_create rate limiting', () => {
   });
 
   it('silently drops when already notified', async () => {
-    const client = createMockClient({
-      commands: {
-        ping: { data: { name: 'ping', description: 'x' }, execute: async () => {}, permissions: [] },
-      },
-    });
-    const responses = [];
-    client.createInteractionResponse = async (id, tok, body) => {
-      responses.push(body);
-    };
+    const { client, responses } = setupRateLimitTest();
 
     for (let i = 0; i < 7; i++) {
       await handleInteraction(client, createMockInteraction({ data: { name: 'ping', options: [] } }));
@@ -854,6 +754,17 @@ describe('interaction_create auto-defer', () => {
     mock.restoreAll();
   });
 
+  function setupDeferMocks(client, responses, edits) {
+    client.createInteractionResponse = async (_id, _tok, body) => {
+      responses.push(body);
+      return {};
+    };
+    client.editOriginalInteractionResponse = async (_app, _tok, body) => {
+      edits.push(body);
+      return {};
+    };
+  }
+
   it('auto-defers a slow command so a late reply still lands', async () => {
     mock.timers.enable({ apis: ['setTimeout'] });
     const responses = [];
@@ -874,14 +785,7 @@ describe('interaction_create auto-defer', () => {
         },
       },
     });
-    client.createInteractionResponse = async (_id, _tok, body) => {
-      responses.push(body);
-      return {};
-    };
-    client.editOriginalInteractionResponse = async (_app, _tok, body) => {
-      edits.push(body);
-      return {};
-    };
+    setupDeferMocks(client, responses, edits);
 
     await handleInteraction(client, createMockInteraction({ data: { name: 'slow', options: [] } }));
 
@@ -945,14 +849,7 @@ describe('interaction_create auto-defer', () => {
         },
       },
     });
-    client.createInteractionResponse = async (_id, _tok, body) => {
-      responses.push(body);
-      return {};
-    };
-    client.editOriginalInteractionResponse = async (_app, _tok, body) => {
-      edits.push(body);
-      return {};
-    };
+    setupDeferMocks(client, responses, edits);
 
     await handleInteraction(client, createMockInteraction({ data: { name: 'slowboom', options: [] } }));
 

@@ -1,11 +1,5 @@
 import { getRecentCases, getCasesByUser } from '../../lib/case.js';
-
-function extractUserID(input) {
-  if (!input || typeof input !== 'string') return;
-  let id = input.match(/<@!?(\d+)>/)?.[1];
-  if (!id && !isNaN(Number(input))) id = input;
-  if (id?.length > 15) return id;
-}
+import { extractUserID } from './adminUtils.js';
 
 const execute = async (client, message, args) => {
   const guildId = message.guild_id;

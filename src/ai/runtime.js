@@ -122,11 +122,8 @@ export class ChannelAIRuntime {
     }
   }
 
-  async _saveNonImageAttachments(rawAttachments, msgId, workspaceDir) {
+  async _downloadAttachments(candidates, msgId, workspaceDir) {
     const saved = [];
-    const candidates = (rawAttachments ?? []).filter(
-      (a) => a?.url && a.content_type && !a.content_type.startsWith('image/'),
-    );
     if (candidates.length === 0) return saved;
     try {
       await fs.mkdir(workspaceDir, { recursive: true });
@@ -151,34 +148,17 @@ export class ChannelAIRuntime {
     return saved;
   }
 
+  async _saveNonImageAttachments(rawAttachments, msgId, workspaceDir) {
+    const candidates = (rawAttachments ?? []).filter(
+      (a) => a?.url && a.content_type && !a.content_type.startsWith('image/'),
+    );
+    return this._downloadAttachments(candidates, msgId, workspaceDir);
+  }
+
   async saveAllAttachments(rawAttachments, msgId, channelId) {
-    const saved = [];
     const candidates = (rawAttachments ?? []).filter((a) => a?.url && a.content_type);
-    if (candidates.length === 0) return saved;
-
     const workspaceDir = path.join(this.workspaceRoot, `channel-${channelId}`);
-    try {
-      await fs.mkdir(workspaceDir, { recursive: true });
-    } catch (err) {
-      this.client.logger?.warn?.('workspace mkdir failed', err);
-      return saved;
-    }
-
-    for (const att of candidates) {
-      const safe = sanitizeFilename(att.filename);
-      const fileKey = att.id ? `${att.id}-${safe}` : `${msgId}-${safe}`;
-      const full = path.join(workspaceDir, fileKey);
-      try {
-        const res = await this.fetcher(att.url);
-        if (!res?.ok) throw new Error(`fetch ${att.url} -> status ${res?.status ?? 'unknown'}`);
-        const buf = Buffer.from(await res.arrayBuffer());
-        await fs.writeFile(full, buf);
-        saved.push({ id: att.id, original: att.filename, saved_path: full, content_type: att.content_type });
-      } catch (err) {
-        this.client.logger?.warn?.('attachment save failed', err);
-      }
-    }
-    return saved;
+    return this._downloadAttachments(candidates, msgId, workspaceDir);
   }
 
   _state(channelId) {

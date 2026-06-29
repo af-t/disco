@@ -181,14 +181,17 @@ test('purge should use bulk delete for multiple messages', async () => {
   assert.ok(bulkDeleteCalls.length > 0, 'Bulk delete should be called for chunks > 1');
 });
 
+function createTwoMessages() {
+  return [
+    { id: '800000000000000001', timestamp: new Date().toISOString() },
+    { id: '800000000000000002', timestamp: new Date().toISOString() },
+  ];
+}
 describe('purge slash command (isInteraction)', () => {
   it('does not pass interaction.id to deleteMessage or bulkDeleteMessages', async () => {
     const INTERACTION_ID = '999000000000000001';
     const allDeletedIds = [];
-    const messages = [
-      { id: '800000000000000001', timestamp: new Date().toISOString() },
-      { id: '800000000000000002', timestamp: new Date().toISOString() },
-    ];
+    const messages = createTwoMessages();
     const client = createMockClient({ messages });
     client.deleteMessage = async (_ch, id) => allDeletedIds.push(id);
     client.bulkDeleteMessages = async (_ch, ids) => allDeletedIds.push(...ids);
@@ -213,10 +216,7 @@ describe('purge slash command (isInteraction)', () => {
 
   it('reports the exact number of messages deleted, not N-1', async () => {
     const replyCalls = [];
-    const messages = [
-      { id: '800000000000000001', timestamp: new Date().toISOString() },
-      { id: '800000000000000002', timestamp: new Date().toISOString() },
-    ];
+    const messages = createTwoMessages();
     const client = createMockClient({ messages });
     client.bulkDeleteMessages = async () => {};
     client.deleteMessage = async () => {};

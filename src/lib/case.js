@@ -46,22 +46,20 @@ export async function resolveCase(client, guildId, caseId) {
   return true;
 }
 
-export async function getCasesByUser(client, guildId, userId, limit = 25) {
+async function _fetchCases(client, guildId, limit, filterFn) {
   const counter = (await client.store.get(`modcase:${guildId}:counter`)) || 0;
   const cases = [];
   for (let i = counter; i >= 1 && cases.length < limit; i--) {
     const c = await client.store.get(`modcase:${guildId}:${i}`);
-    if (c && c.user_id === userId) cases.push(c);
+    if (c && filterFn(c)) cases.push(c);
   }
   return cases;
 }
 
+export async function getCasesByUser(client, guildId, userId, limit = 25) {
+  return _fetchCases(client, guildId, limit, (c) => c.user_id === userId);
+}
+
 export async function getRecentCases(client, guildId, limit = 25) {
-  const counter = (await client.store.get(`modcase:${guildId}:counter`)) || 0;
-  const cases = [];
-  for (let i = counter; i >= 1 && cases.length < limit; i--) {
-    const c = await client.store.get(`modcase:${guildId}:${i}`);
-    if (c) cases.push(c);
-  }
-  return cases;
+  return _fetchCases(client, guildId, limit, () => true);
 }
