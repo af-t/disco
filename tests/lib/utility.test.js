@@ -253,6 +253,19 @@ test('getPermissions: admin permission flag (8 = 1<<3)', async () => {
   assert.strictEqual(typeof perms, 'bigint');
 });
 
+test('getPermissions: forwards the force option to getRoles', async () => {
+  const roleCalls = [];
+  const mockClient = {
+    getRoles: async (guildId, options) => {
+      roleCalls.push([guildId, options]);
+      return [{ id: 'role_1', permissions: '1024' }];
+    },
+  };
+  const member = { roles: ['role_1'] };
+  await getPermissions(mockClient, 'guild_1', member, { force: true });
+  assert.deepEqual(roleCalls[0], ['guild_1', { force: true }]);
+});
+
 // ── Logger ────────────────────────────────────────────────────────────────────
 describe('Logger methods', () => {
   afterEach(() => mock.restoreAll());

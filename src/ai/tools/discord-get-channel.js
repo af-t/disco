@@ -1,4 +1,5 @@
 import { formatToolError } from './error.js';
+import { sameGuildChannelError } from './scope.js';
 function sanitize(ch) {
   if (!ch) return null;
   return {
@@ -23,9 +24,11 @@ export const definition = {
   },
 };
 
-export async function execute({ client }, { channel_id }) {
+export async function execute(ctx, { channel_id }) {
+  const scopeError = await sameGuildChannelError(ctx, channel_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
   try {
-    const ch = await client.getChannel(channel_id);
+    const ch = await ctx.client.getChannel(channel_id);
     return JSON.stringify({ ok: true, channel: sanitize(ch) });
   } catch (err) {
     return JSON.stringify({ ok: false, error: formatToolError(err) });

@@ -67,6 +67,14 @@ export default async (client, interaction) => {
 
   if (!cmd) return;
 
+  // Permissioned commands never run without a guild to check roles in
+  if (cmd.permissions && cmd.permissions.length > 0 && !interaction.guild_id) {
+    return client.createInteractionResponse(interaction.id, interaction.token, {
+      type: 4,
+      data: { content: 'This command can only be used in a guild.', flags: 64 },
+    });
+  }
+
   // Permission check for slash commands (fixes C1)
   if (cmd.permissions && cmd.permissions.length > 0 && interaction.guild_id) {
     const member =

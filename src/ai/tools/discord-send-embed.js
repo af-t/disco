@@ -1,4 +1,5 @@
 import { finishSend } from './send-helper.js';
+import { channelScopeError } from './scope.js';
 export const definition = {
   name: 'discord_send_embed',
   description:
@@ -33,10 +34,12 @@ export const definition = {
   },
 };
 
-export async function execute({ client, runtime }, { channel_id, content, embed }) {
+export async function execute(ctx, { channel_id, content, embed }) {
+  const scopeError = channelScopeError(ctx, channel_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
   const built = { ...embed };
   if (embed?.image_url) built.image = { url: embed.image_url };
   if (embed?.thumbnail_url) built.thumbnail = { url: embed.thumbnail_url };
   if (embed?.footer_text) built.footer = { text: embed.footer_text };
-  return finishSend(runtime, client.sendMessage(channel_id, content ?? '', { embeds: [built] }));
+  return finishSend(ctx.runtime, ctx.client.sendMessage(channel_id, content ?? '', { embeds: [built] }));
 }

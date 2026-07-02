@@ -79,6 +79,7 @@ export class ChannelAIRuntime {
     this.fetcher = fetcher ?? ((url) => fetch(url));
     this.workspaceRoot = workspaceRoot ?? path.join(process.cwd(), 'workspaces');
     this._agentGuild = new Map();
+    this._authorizableByAgent = new Map();
     this._installCleanupHook();
   }
 
@@ -170,6 +171,14 @@ export class ChannelAIRuntime {
     return s;
   }
 
+  setAuthorizableIds(agentKey, ids) {
+    this._authorizableByAgent.set(agentKey, new Set(ids ?? []));
+  }
+
+  getAuthorizableIds(agentKey) {
+    return this._authorizableByAgent.get(agentKey) ?? new Set();
+  }
+
   onBotMessage(sentMessage) {
     if (!sentMessage?.channel_id) return;
     const s = this._state(sentMessage.channel_id);
@@ -245,8 +254,9 @@ export class ChannelAIRuntime {
       const channelName = s.channelName ?? msg.channel_id;
       const block = renderEventBlock(snap, { channel_name: channelName, channel_id: msg.channel_id });
       for (const observed of s.rollingBuffer) observed.flag = 'observed';
-      // Only this fresh message may authorize a gated action now.
+      // Only this fresh message may authorize.
       s.authorizableIds = new Set([snap.id]);
+      this.setAuthorizableIds(channelKey, [snap.id]);
       s.pendingMsgs = s.pendingMsgs.filter((m) => m !== snap);
       this._dispatch(channelKey, msg.channel_id, msg.guild_id ?? null, block).catch((err) =>
         this.client.logger?.error?.('AI steer dispatch error', err),
@@ -308,8 +318,12 @@ export class ChannelAIRuntime {
       for (const snap of s.rollingBuffer) {
         if (activeMsgs.includes(snap)) snap.flag = 'observed';
       }
-      // Only this turn's new messages may authorize a gated action.
+      // Only this turn's messages may authorize.
       s.authorizableIds = new Set(activeMsgs.map((m) => m.id));
+      this.setAuthorizableIds(
+        channelKey,
+        activeMsgs.map((m) => m.id),
+      );
       s.pendingMsgs = s.pendingMsgs.filter((m) => !activeMsgs.includes(m));
 
       await this._dispatch(channelKey, channelId, guildId, content);
@@ -331,13 +345,16 @@ export class ChannelAIRuntime {
 
   async _dispatch(channelKey, channelId, guildId, content) {
     if (guildId) this._agentGuild.set(channelKey, guildId);
+    const workspaceDir = path.join(this.workspaceRoot, `channel-${channelId}`);
     const spawnContext = {
       mode: 'natural',
+      channelId,
+      guildId,
       systemPrompt: this.systemPrompt,
       maxTurns: this.config.maxTurns,
       compactThreshold: this.config.compactThreshold,
       keepTail: this.config.keepTail,
-      workspaceDir: path.join(this.workspaceRoot, `channel-${channelId}`),
+      workspaceDir,
       memoryDir: this._memoryDir(guildId ? `guild-${guildId}` : `dm-${channelId}`),
       history: null,
     };
@@ -382,13 +399,12 @@ export class ChannelAIRuntime {
   async invoke({ mode, msg, explicitPrompt }) {
     if (mode !== 'command') throw new Error(`Unknown invoke mode: ${mode}`);
 
-    // The command message is the trigger that may authorize gated actions.
-    this._state(msg.channel_id).authorizableIds = new Set([msg.id]);
-
     const guildPart = msg.guild_id ?? 'dm';
     const userId = msg.author?.id ?? 'unknown';
     const agentKey = `command:${guildPart}:${userId}`;
     const sessionKey = `session:openrouter:${guildPart}:${userId}`;
+
+    this.setAuthorizableIds(agentKey, [msg.id]);
 
     let history = null;
     try {
@@ -423,6 +439,8 @@ export class ChannelAIRuntime {
     this._agentGuild.set(agentKey, msg.guild_id ?? null);
     const spawnContext = {
       mode: 'command',
+      channelId: msg.channel_id,
+      guildId: msg.guild_id ?? null,
       systemPrompt: buildCommandSystemPrompt({ botUsername: this.identity.name ?? 'Bot', userTag }),
       maxTurns: this.config.maxTurns,
       compactThreshold: this.config.compactThreshold,

@@ -134,7 +134,7 @@ class VoiceConnection {
     this._sendVoiceOp(VOICE_OP.IDENTIFY, {
       server_id: this.guildId,
       user_id: this.client._session.user.id,
-      session_id: this._voiceSessionId,
+      session_id: this.client._voiceSessionId,
       token,
     });
   }

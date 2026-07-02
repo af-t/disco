@@ -12,28 +12,39 @@ function makeCtx({
   perms = permissionFlags.MANAGE_MESSAGES,
   roleId = 'role1',
   agentKey,
+  agentContext,
+  memberCalls = [],
+  roleCalls = [],
 } = {}) {
   const client = {
     getChannel: async () => ({ guild_id: guildId }),
     getMessage: async () => ({ author }),
-    getGuildMember: async () => ({ roles: [roleId] }),
-    getRoles: async () => [
-      { id: guildId, permissions: '0' },
-      { id: roleId, permissions: String(perms) },
-    ],
+    getGuildMember: async (...args) => {
+      memberCalls.push(args);
+      return { roles: [roleId] };
+    },
+    getRoles: async (...args) => {
+      roleCalls.push(args);
+      return [
+        { id: guildId, permissions: '0' },
+        { id: roleId, permissions: String(perms) },
+      ];
+    },
   };
   const runtime = {
     _agentGuild: new Map(),
     channels: new Map([['c1', { authorizableIds: new Set(triggerIds) }]]),
   };
-  return { client, runtime, agentKey };
+  return { client, runtime, agentKey, agentContext };
 }
 
 describe('authorize', () => {
   it('authorizes when the instruction author holds the required permission', async () => {
     const ctx = makeCtx();
     const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
-    assert.deepEqual(res, { ok: true, guildId: 'g1', authorizedBy: 'u-admin' });
+    assert.equal(res.ok, true);
+    assert.equal(res.guildId, 'g1');
+    assert.equal(res.authorizedBy, 'u-admin');
   });
 
   it('authorizes via ADMINISTRATOR even without the specific permission', async () => {
@@ -67,6 +78,32 @@ describe('authorize', () => {
     const ctx = makeCtx({ agentKey: 'channel:c1' });
     const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
     assert.equal(res.ok, true);
+  });
+
+  it('rejects a command agent acting outside its invoking channel', async () => {
+    const ctx = makeCtx({ agentKey: 'command:g1:u1', agentContext: { channelId: 'c-other' } });
+    const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
+    assert.equal(res.ok, false);
+    assert.match(res.error, /outside this conversation/);
+  });
+
+  it('uses fresh member and role reads for authorization', async () => {
+    const memberCalls = [];
+    const roleCalls = [];
+    const ctx = makeCtx({ memberCalls, roleCalls });
+    const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
+    assert.equal(res.ok, true);
+    assert.deepEqual(memberCalls[0], ['g1', 'u-admin', { force: true }]);
+    assert.deepEqual(roleCalls[0], ['g1', { force: true }]);
+  });
+
+  it('rejects when the agent-specific authorizer set excludes the message', async () => {
+    const ctx = makeCtx({ agentKey: 'command:g1:u1' });
+    ctx.runtime.getAuthorizableIds = (agentKey) =>
+      agentKey === 'command:g1:u1' ? new Set(['command-msg']) : new Set();
+    const res = await authorize(ctx, { channel_id: 'c1', authorizing_message_id: 'm-admin' }, 'MANAGE_MESSAGES');
+    assert.equal(res.ok, false);
+    assert.match(res.error, /trigger/);
   });
 
   it('rejects in a DM (no guild)', async () => {

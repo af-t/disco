@@ -8,7 +8,7 @@ const execute = async (client, message, args) => {
       message: messageText,
       since: Date.now(),
     },
-    { ttl: 604_800_000 },
+    { isCache: true, ttl: 604_800_000 },
   ); // 7 days
 
   await client.reply(

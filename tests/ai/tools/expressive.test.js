@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import path from 'node:path';
+import * as send from '../../../src/ai/tools/discord-send.js';
 import * as embed from '../../../src/ai/tools/discord-send-embed.js';
 import * as sticker from '../../../src/ai/tools/discord-send-sticker.js';
 import * as media from '../../../src/ai/tools/discord-send-media.js';
@@ -57,6 +59,30 @@ describe('expressive tools', () => {
     const out = JSON.parse(await media.execute(ctx, { channel_id: 'c1', url: 'http://cdn/a.gif' }));
     assert.equal(out.ok, true);
     assert.deepEqual(calls[0].options.files, ['http://cdn/a.gif']);
+  });
+
+  it('discord_send rejects channels outside the agent context', async () => {
+    const { ctx, calls } = sendCtx();
+    ctx.agentContext = { channelId: 'c1', guildId: 'g1' };
+    const out = JSON.parse(await send.execute(ctx, { channel_id: 'c2', content: 'nope' }));
+    assert.equal(out.ok, false);
+    assert.match(out.error, /outside this conversation/);
+    assert.equal(calls.length, 0);
+  });
+
+  it('discord_send_media rejects local files outside the agent workspace', async () => {
+    const { ctx, calls } = sendCtx();
+    ctx.agentContext = {
+      channelId: 'c1',
+      guildId: 'g1',
+      workspaceDir: path.join(process.cwd(), '.agent-test-workspace'),
+    };
+    const out = JSON.parse(
+      await media.execute(ctx, { channel_id: 'c1', url: path.join(process.cwd(), 'package.json') }),
+    );
+    assert.equal(out.ok, false);
+    assert.match(out.error, /workspace/);
+    assert.equal(calls.length, 0);
   });
 
   it('discord_list_expressions returns emojis and stickers', async () => {

@@ -1,4 +1,5 @@
 import { formatToolError } from './error.js';
+import { sameGuildChannelError } from './scope.js';
 export const definition = {
   name: 'discord_get_thread',
   description:
@@ -10,9 +11,11 @@ export const definition = {
   },
 };
 
-export async function execute({ client }, { thread_id }) {
+export async function execute(ctx, { thread_id }) {
+  const scopeError = await sameGuildChannelError(ctx, thread_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
   try {
-    const ch = await client.getChannel(thread_id);
+    const ch = await ctx.client.getChannel(thread_id);
     return JSON.stringify({
       ok: true,
       thread: {

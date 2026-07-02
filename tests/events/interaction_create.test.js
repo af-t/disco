@@ -369,6 +369,37 @@ describe('interaction_create permission check', () => {
     assert.ok(responses.some((r) => r.data?.content?.includes('do not have permission')));
   });
 
+  it('denies a permissioned command invoked in a DM (no guild_id)', async () => {
+    const executed = [];
+    const client = createMockClient({
+      commands: {
+        ban: {
+          data: { name: 'ban', description: 'Ban', permissions: ['BAN_MEMBERS'] },
+          permissions: ['BAN_MEMBERS'],
+          execute: async () => {
+            executed.push(1);
+          },
+        },
+      },
+    });
+    const responses = [];
+    client.createInteractionResponse = async (id, tok, body) => {
+      responses.push(body);
+    };
+
+    await handleInteraction(
+      client,
+      createMockInteraction({
+        data: { name: 'ban', options: [] },
+        guild_id: undefined,
+        member: null,
+        user: { id: USER_ID },
+      }),
+    );
+    assert.strictEqual(executed.length, 0);
+    assert.ok(responses.some((r) => r.data?.content?.match(/guild/i)));
+  });
+
   it('ADMINISTRATOR bypasses permission check', async () => {
     const executed = [];
     const client = createMockClient({

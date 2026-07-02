@@ -49,3 +49,65 @@ describe('member REST helpers', () => {
     assert.equal(calls[0].path, '/guilds/g1/members/u1/roles/r1');
   });
 });
+
+describe('cache bypass with force option', () => {
+  function clientWithStore() {
+    const { client, calls } = clientWithCapture();
+    const storeCalls = [];
+    client.store = {
+      get: async (k) => {
+        storeCalls.push(['get', k]);
+        return { cached: true };
+      },
+      set: async (k, v) => {
+        storeCalls.push(['set', k, v]);
+      },
+    };
+    client.makeRequest = async (method, path) => {
+      calls.push({ method, path });
+      return { fresh: true };
+    };
+    return { client, calls, storeCalls };
+  }
+
+  it('_cacheableGet reads from the store when force is not set', async () => {
+    const { client, calls, storeCalls } = clientWithStore();
+    const result = await client._cacheableGet('/guilds/g1');
+    assert.deepEqual(result, { cached: true });
+    assert.equal(calls.length, 0);
+    assert.deepEqual(storeCalls[0], ['get', '/guilds/g1']);
+  });
+
+  it('_cacheableGet skips the store read and refreshes the cache when force is true', async () => {
+    const { client, calls, storeCalls } = clientWithStore();
+    const result = await client._cacheableGet('/guilds/g1', { force: true });
+    assert.deepEqual(result, { fresh: true });
+    assert.equal(calls.length, 1);
+    assert.ok(!storeCalls.some((c) => c[0] === 'get'));
+    assert.deepEqual(
+      storeCalls.find((c) => c[0] === 'set'),
+      ['set', '/guilds/g1', { fresh: true }],
+    );
+  });
+
+  it('getGuild forwards force to the cache layer without leaking it into the query string', async () => {
+    const { client, calls } = clientWithStore();
+    await client.getGuild('g1', { force: true });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].path, '/guilds/g1?');
+  });
+
+  it('getRoles forwards force to the cache layer', async () => {
+    const { client, calls } = clientWithStore();
+    const result = await client.getRoles('g1', { force: true });
+    assert.deepEqual(result, { fresh: true });
+    assert.equal(calls.length, 1);
+  });
+
+  it('getGuildMember forwards force to the cache layer', async () => {
+    const { client, calls } = clientWithStore();
+    const result = await client.getGuildMember('g1', 'u1', { force: true });
+    assert.deepEqual(result, { fresh: true });
+    assert.equal(calls.length, 1);
+  });
+});

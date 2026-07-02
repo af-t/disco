@@ -1,5 +1,6 @@
 import { sanitizeMessage, processAttachments } from './message-formatter.js';
 import { formatToolError } from './error.js';
+import { channelScopeError } from './scope.js';
 const DEFAULT_LIMIT = 20;
 
 export const definition = {
@@ -17,19 +18,21 @@ export const definition = {
   },
 };
 
-export async function execute({ client, runtime }, { channel_id, before_message_id, limit }) {
+export async function execute(ctx, { channel_id, before_message_id, limit }) {
+  const scopeError = channelScopeError(ctx, channel_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
   try {
-    const hardMax = runtime?.config?.fetchHistoryMax ?? 50;
+    const hardMax = ctx.runtime?.config?.fetchHistoryMax ?? 50;
     const n = Math.min(Math.max(1, limit ?? DEFAULT_LIMIT), hardMax);
     const qs = new URLSearchParams({ limit: String(n) });
     if (before_message_id) qs.set('before', before_message_id);
-    const msgs = await client.makeRequest('GET', `/channels/${channel_id}/messages?${qs.toString()}`);
+    const msgs = await ctx.client.makeRequest('GET', `/channels/${channel_id}/messages?${qs.toString()}`);
     const sanitizedMsgs = msgs.map(sanitizeMessage);
 
-    if (runtime) {
+    if (ctx.runtime) {
       await Promise.all(
         msgs.map(async (raw, i) => {
-          await processAttachments(runtime, raw, sanitizedMsgs[i], channel_id);
+          await processAttachments(ctx.runtime, raw, sanitizedMsgs[i], channel_id);
         }),
       );
     }

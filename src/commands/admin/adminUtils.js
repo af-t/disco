@@ -1,5 +1,6 @@
 import { createCase } from '../../lib/case.js';
 import { postModLog } from '../../lib/modlog.js';
+import { assertCanModerateMember } from '../../lib/role-hierarchy.js';
 export function extractUserID(input) {
   if (!input || typeof input !== 'string') return;
   let id = input.match(/<@!?(\d+)>/)?.[1];
@@ -40,9 +41,15 @@ export async function executeModAction(client, message, args, actionName, action
     response = `Please specify at least one valid user to ${actionName}. Mention users or provide their IDs.`;
   } else {
     let count = 0;
+    let blocked = 0;
     const actionReason = reason.join(' ');
     for (const uid of uids) {
       try {
+        const hierarchy = await assertCanModerateMember(client, message.guild_id, message.author.id, uid);
+        if (!hierarchy.ok) {
+          blocked++;
+          continue;
+        }
         await doAction(uid, actionReason);
         const caseId = await createCase(client, message.guild_id, actionName, uid, message.author.id, actionReason);
         await postModLog(client, message.guild_id, {
@@ -58,6 +65,9 @@ export async function executeModAction(client, message, args, actionName, action
       }
     }
     response = `${actionVerb} **${count}** user${count > 1 ? 's' : ''}`;
+    if (blocked > 0) {
+      response += `; **${blocked}** blocked by role hierarchy`;
+    }
   }
   client.reply(message, response).catch((err) => client.logger?.warn?.(`Failed to send ${actionName} feedback:`, err));
 }

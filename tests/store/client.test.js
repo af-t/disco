@@ -96,7 +96,7 @@ describe('StoreClient connect and send/receive', () => {
 
   it('sends a GET and receives a response', async () => {
     const { client, ws } = makeClient();
-    mockWsSend(ws, (op) => (op === 'get' ? 'pong' : null), 10);
+    mockWsSend(ws, (op) => (op === 'getWithMetadata' ? 'pong' : null), 10);
     const result = await client.get('test');
     assert.strictEqual(result, 'pong');
     stopClient(client);
@@ -272,13 +272,49 @@ describe('StoreClient _createTask GET', () => {
     ws.send = (payload) => {
       const { op, id } = JSON.parse(payload);
       setTimeout(() => {
-        ws.dispatch('message', { data: serialize({ id, data: op === 'get' ? 'from-server' : null }) });
+        const data =
+          op === 'getWithMetadata' ? { value: 'from-server', metadata: { isCache: true, customTTL: null } } : null;
+        ws.dispatch('message', { data: serialize({ id, data }) });
       }, 5);
     };
     const result = await client.get('server-key');
     assert.strictEqual(result, 'from-server');
     assert.strictEqual(client._stats.cache.promotions, 1);
     assert.strictEqual(client._data.get('server-key'), 'from-server');
+    stopClient(client);
+  });
+
+  it('server fallback preserves isCache=false so re-demoting keeps the key persistent', async () => {
+    const { client, ws } = makeClient();
+    const setCalls = [];
+    ws.send = (payload) => {
+      const { op, id, args } = JSON.parse(payload);
+      if (op === 'set') setCalls.push(args);
+      setTimeout(() => {
+        const data =
+          op === 'getWithMetadata' ? { value: 'persisted-value', metadata: { isCache: false, customTTL: null } } : null;
+        ws.dispatch('message', { data: serialize({ id, data }) });
+      }, 5);
+    };
+    const result = await client.get('persistent-key');
+    assert.strictEqual(result, 'persisted-value');
+    assert.strictEqual(client._metadata.get('persistent-key').isCache, false);
+
+    // Simulate a later re-demote (e.g. memory pressure) — must stay classified as persistent.
+    client._data.set('persistent-key', 'persisted-value');
+    client._metadata.get('persistent-key').dataSizeV8 = 10;
+    await client._demote('persistent-key');
+    assert.deepEqual(setCalls[0][2], { isCache: false, ttl: null });
+    assert.strictEqual(client._metadata.get('persistent-key').expired, Infinity);
+    stopClient(client);
+  });
+
+  it('server fallback with a legacy plain-value response defaults to isCache=true', async () => {
+    const { client, ws } = makeClient();
+    mockWsSend(ws, (op) => (op === 'getWithMetadata' ? 'legacy-value' : null));
+    const result = await client.get('legacy-key');
+    assert.strictEqual(result, 'legacy-value');
+    assert.strictEqual(client._metadata.get('legacy-key').isCache, true);
     stopClient(client);
   });
 

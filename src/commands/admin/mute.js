@@ -1,6 +1,7 @@
 import { createCase } from '../../lib/case.js';
 import { postModLog } from '../../lib/modlog.js';
 import { extractUserID } from './adminUtils.js';
+import { assertCanModerateMember } from '../../lib/role-hierarchy.js';
 
 // Time conversation units
 const TIME_UNITS = {
@@ -8,7 +9,7 @@ const TIME_UNITS = {
   m: 1000 * 60,
   h: 1000 * 60 * 60,
   d: 1000 * 60 * 60 * 24,
-  w: 1000 * 60 * 24 * 7,
+  w: 1000 * 60 * 60 * 24 * 7,
   M: 1000 * 60 * 60 * 24 * 30,
   y: 1000 * 60 * 60 * 24 * 365,
   ms: 1,
@@ -52,6 +53,14 @@ const execute = async (client, message, args) => {
     client
       .reply(message, 'Invalid duration format. Please use a valid duration (e.g., `10m`, `1h`, `7d`, `30s`).')
       .catch((err) => client.logger?.warn?.('Failed to send duration error:', err));
+    return;
+  }
+
+  const hierarchy = await assertCanModerateMember(client, message.guild_id, message.author.id, memberId);
+  if (!hierarchy.ok) {
+    client
+      .reply(message, `Cannot mute <@${memberId}>: ${hierarchy.error}`)
+      .catch((err) => client.logger?.warn?.('Failed to send hierarchy error:', err));
     return;
   }
 

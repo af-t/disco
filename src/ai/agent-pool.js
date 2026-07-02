@@ -21,12 +21,13 @@ function deferred() {
 }
 
 export class ChildHandle {
-  constructor({ agentKey, child, getExecutor, ctx, logger }) {
+  constructor({ agentKey, child, getExecutor, ctx, logger, agentContext }) {
     this.agentKey = agentKey;
     this.child = child;
     this.getExecutor = getExecutor;
     this.ctx = ctx;
     this.logger = logger;
+    this.agentContext = agentContext;
     this.running = false;
     this.closed = false;
     this.runSeq = 0;
@@ -82,8 +83,8 @@ export class ChildHandle {
       return;
     }
     try {
-      // agentKey lets gated tools bind an action to this child's channel.
-      const result = await exec({ ...this.ctx, agentKey: this.agentKey }, input ?? {});
+      // Scope every tool call to this child.
+      const result = await exec({ ...this.ctx, agentKey: this.agentKey, agentContext: this.agentContext }, input ?? {});
       this._send({ t: MSG.TOOL_RESULT, id, ok: true, result });
     } catch (err) {
       this._send({ t: MSG.TOOL_RESULT, id, ok: false, error: String(err?.message ?? err) });
@@ -249,6 +250,7 @@ export class AgentPool {
       getExecutor,
       ctx: this.ctx,
       logger: this.logger,
+      agentContext: spawnContext,
     });
     handle.onExit = (code) => this._onChildExit(agentKey, handle, code);
     this.children.set(agentKey, handle);

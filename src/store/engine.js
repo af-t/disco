@@ -202,6 +202,16 @@ class StoreManager extends StoreBase {
     }
   }
 
+  // Value plus its real isCache/customTTL classification, so callers
+  // promoting from a fresh process never have to guess.
+  async getWithMetadata(key) {
+    if (typeof key !== 'string') throw new TypeError('key must be a string');
+    const value = await this.get(key);
+    if (value === undefined) return undefined;
+    const meta = this._metadata.get(key);
+    return { value, metadata: { isCache: !!meta?.isCache, customTTL: meta?.customTTL ?? null } };
+  }
+
   // --- Backend-specific delete ---
 
   async _deleteFromBackend(_key, meta) {
@@ -228,7 +238,7 @@ class StoreManager extends StoreBase {
       await this._atomicWrite(meta.locationFile, raw);
 
       meta.location = LOCATION.DISK;
-      meta.expired = meta.isCache ? Date.now() + this.diskTTL : Infinity;
+      meta.expired = meta.customTTL ? Date.now() + meta.customTTL : meta.isCache ? Date.now() + this.diskTTL : Infinity;
       this._data.delete(key);
       this._metadata.set(key, meta);
       this._dirty = true;

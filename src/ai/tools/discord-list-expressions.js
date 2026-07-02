@@ -1,4 +1,5 @@
 import { formatToolError } from './error.js';
+import { guildScopeError } from './scope.js';
 const MAX = 100;
 
 export const definition = {
@@ -12,11 +13,13 @@ export const definition = {
   },
 };
 
-export async function execute({ client }, { guild_id }) {
+export async function execute(ctx, { guild_id }) {
+  const scopeError = guildScopeError(ctx, guild_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
   try {
     const [emojis, stickers] = await Promise.all([
-      client.makeRequest('GET', `/guilds/${guild_id}/emojis`).catch(() => []),
-      client.makeRequest('GET', `/guilds/${guild_id}/stickers`).catch(() => []),
+      ctx.client.makeRequest('GET', `/guilds/${guild_id}/emojis`).catch(() => []),
+      ctx.client.makeRequest('GET', `/guilds/${guild_id}/stickers`).catch(() => []),
     ]);
     return JSON.stringify({
       ok: true,

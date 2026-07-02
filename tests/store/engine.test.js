@@ -561,6 +561,48 @@ describe('StoreManager argument and lifecycle guards', () => {
   });
 });
 
+describe('StoreEngine getWithMetadata', () => {
+  it('returns the value plus isCache/customTTL metadata', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_getwithmeta_' + Date.now());
+    const engine = new Engine({ diskPath });
+    await engine.ready();
+    try {
+      await engine.set('persistent', { v: 1 }, false);
+      const persistent = await engine.getWithMetadata('persistent');
+      assert.deepStrictEqual(persistent.value, { v: 1 });
+      assert.strictEqual(persistent.metadata.isCache, false);
+
+      await engine.set('cached', { v: 2 }, { isCache: true, ttl: 5000 });
+      const cached = await engine.getWithMetadata('cached');
+      assert.strictEqual(cached.metadata.isCache, true);
+      assert.strictEqual(cached.metadata.customTTL, 5000);
+
+      assert.strictEqual(await engine.getWithMetadata('nope'), undefined);
+    } finally {
+      await engine.close();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('StoreEngine _demote respects customTTL', () => {
+  it('uses customTTL instead of forcing Infinity on a persistent key', async () => {
+    const diskPath = join(os.tmpdir(), 'engine_demote_customttl_' + Date.now());
+    const engine = new Engine({ diskPath });
+    await engine.ready();
+    try {
+      await engine.set('pk', { v: 1 }, { isCache: false, ttl: 60_000 });
+      await engine._demote('pk');
+      const meta = engine._metadata.get('pk');
+      assert.ok(meta.expired < Infinity, 'expired should be a real timestamp, not Infinity');
+      assert.ok(meta.expired <= Date.now() + 60_000 + 1000);
+    } finally {
+      await engine.close();
+      await fs.rm(diskPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('StoreEngine durability: atomic writes', () => {
   afterEach(() => mock.restoreAll());
 

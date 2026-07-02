@@ -1,4 +1,5 @@
 import { finishSend } from './send-helper.js';
+import { channelScopeError, scopedMediaPath } from './scope.js';
 export const definition = {
   name: 'discord_send_media',
   description:
@@ -14,6 +15,10 @@ export const definition = {
   },
 };
 
-export async function execute({ client, runtime }, { channel_id, url, content }) {
-  return finishSend(runtime, client.sendMessage(channel_id, content ?? '', { files: [url] }));
+export async function execute(ctx, { channel_id, url, content }) {
+  const scopeError = channelScopeError(ctx, channel_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
+  const scoped = await scopedMediaPath(ctx, url);
+  if (!scoped.ok) return JSON.stringify(scoped);
+  return finishSend(ctx.runtime, ctx.client.sendMessage(channel_id, content ?? '', { files: [scoped.url] }));
 }

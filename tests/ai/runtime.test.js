@@ -385,7 +385,38 @@ describe('ChannelAIRuntime with the agent pool', () => {
     const pool = stubPool();
     const rt = new ChannelAIRuntime({ client: stubClient(), pool, config: { dailyLimit: 1000 } });
     await rt.invoke({ mode: 'command', msg: msg({ id: 'm1' }), explicitPrompt: 'ban that user' });
-    assert.ok(rt._state('c1').authorizableIds.has('m1'));
+    assert.ok(rt.getAuthorizableIds('command:g1:u1').has('m1'));
+  });
+
+  it('keeps command authorizers separate from channel authorizers in the same channel', async () => {
+    const pool = stubPool();
+    const rt = new ChannelAIRuntime({ client: stubClient(), pool, config: { dailyLimit: 1000 } });
+    rt.setAuthorizableIds('channel:c1', ['natural-admin']);
+    await rt.invoke({ mode: 'command', msg: msg({ id: 'command-msg' }), explicitPrompt: 'ban that user' });
+    assert.ok(rt.getAuthorizableIds('channel:c1').has('natural-admin'));
+    assert.ok(!rt.getAuthorizableIds('channel:c1').has('command-msg'));
+    assert.ok(rt.getAuthorizableIds('command:g1:u1').has('command-msg'));
+  });
+
+  it('passes channel, guild, and workspace context to natural and command agents', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const pool = stubPool();
+    const rt = new ChannelAIRuntime({
+      client: stubClient(),
+      pool,
+      config: { debounceMs: 20, forceDebounceMs: 5, dailyLimit: 1000 },
+    });
+    await rt.onMessage(msg({ id: 'm1', content: 'hello there' }));
+    mock.timers.tick(25);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(pool.runs[0].spawnContext.channelId, 'c1');
+    assert.equal(pool.runs[0].spawnContext.guildId, 'g1');
+    assert.match(pool.runs[0].spawnContext.workspaceDir, /channel-c1$/);
+
+    await rt.invoke({ mode: 'command', msg: msg({ id: 'm2' }), explicitPrompt: 'do a thing' });
+    assert.equal(pool.runs[1].spawnContext.channelId, 'c1');
+    assert.equal(pool.runs[1].spawnContext.guildId, 'g1');
+    assert.match(pool.runs[1].spawnContext.workspaceDir, /command-g1-u1$/);
   });
 
   it('automatically fetches replied-to message attachments and sends them inline', async () => {

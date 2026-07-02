@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import * as chan from '../../../src/ai/tools/discord-manage-channel.js';
 import * as role from '../../../src/ai/tools/discord-manage-role.js';
 import * as guild from '../../../src/ai/tools/discord-edit-guild.js';
+import permissionFlags from '../../../src/lib/permission.js';
 import { gatedCtx } from './test_helper.js';
 
 const restStub = (calls) => ({
@@ -49,6 +50,63 @@ describe('guild administration tools', () => {
       authorizing_message_id: 'm-admin',
     });
     assert.deepEqual(calls[0], ['deleteChannel', 'cX']);
+  });
+
+  it('manage_channel rejects edit/delete targets from another guild', async () => {
+    const calls = [];
+    const { ctx } = gatedCtx({ rest: restStub(calls) });
+    ctx.client.getChannel = async (channelId) => ({ guild_id: channelId === 'c1' ? 'g1' : 'g2' });
+    const out = JSON.parse(
+      await chan.execute(ctx, {
+        channel_id: 'c1',
+        action: 'delete',
+        target_channel_id: 'c-other-guild',
+        authorizing_message_id: 'm-admin',
+      }),
+    );
+    assert.equal(out.ok, false);
+    assert.match(out.error, /same guild/);
+    assert.equal(calls.length, 0);
+  });
+
+  it('manage_role rejects administrator grants from non-admin role managers', async () => {
+    const calls = [];
+    const { ctx } = gatedCtx({ perms: permissionFlags.MANAGE_ROLES, rest: restStub(calls) });
+    const out = JSON.parse(
+      await role.execute(ctx, {
+        channel_id: 'c1',
+        action: 'create',
+        options: { name: 'admin-ish', permissions: String(permissionFlags.ADMINISTRATOR) },
+        authorizing_message_id: 'm-admin',
+      }),
+    );
+    assert.equal(out.ok, false);
+    assert.match(out.error, /permissions/);
+    assert.equal(calls.length, 0);
+  });
+
+  it('manage_role rejects assigning roles at or above the authorizer position', async () => {
+    const calls = [];
+    const { ctx } = gatedCtx({ perms: permissionFlags.MANAGE_ROLES, rest: restStub(calls) });
+    ctx.client.getGuildMember = async (_guildId, userId) => ({ roles: userId === 'a1' ? ['mod'] : ['member'] });
+    ctx.client.getRoles = async () => [
+      { id: 'g1', permissions: '0', position: 0 },
+      { id: 'member', permissions: '0', position: 1 },
+      { id: 'mod', permissions: String(permissionFlags.MANAGE_ROLES), position: 5 },
+      { id: 'high', permissions: '0', position: 5 },
+    ];
+    const out = JSON.parse(
+      await role.execute(ctx, {
+        channel_id: 'c1',
+        action: 'assign',
+        user_id: 'u9',
+        role_id: 'high',
+        authorizing_message_id: 'm-admin',
+      }),
+    );
+    assert.equal(out.ok, false);
+    assert.match(out.error, /role hierarchy/);
+    assert.equal(calls.length, 0);
   });
 
   it('manage_role assign calls addMemberRole', async () => {

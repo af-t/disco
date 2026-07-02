@@ -89,7 +89,9 @@ class DiscordClient extends level2 {
         const { pathname } = new URL(file);
         const req = await fetch(file);
         result.filename = path.basename(pathname);
-        result.filepath = path.join(os.tmpdir(), String(process.pid), result.filename);
+        // hash the full URL so different sources with the same basename never collide
+        const urlHash = createHash('sha1').update(file).digest('hex').slice(0, 16);
+        result.filepath = path.join(os.tmpdir(), String(process.pid), `${urlHash}-${result.filename}`);
 
         fs.mkdirSync(path.dirname(result.filepath), { recursive: true });
         const stream = fs.createWriteStream(result.filepath);

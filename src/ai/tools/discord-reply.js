@@ -1,4 +1,5 @@
 import { finishSend } from './send-helper.js';
+import { channelScopeError } from './scope.js';
 export const definition = {
   name: 'discord_reply',
   description:
@@ -14,6 +15,8 @@ export const definition = {
   },
 };
 
-export async function execute({ client, runtime }, { channel_id, message_id, content }) {
-  return finishSend(runtime, client.reply({ channel_id, id: message_id }, content));
+export async function execute(ctx, { channel_id, message_id, content }) {
+  const scopeError = channelScopeError(ctx, channel_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
+  return finishSend(ctx.runtime, ctx.client.reply({ channel_id, id: message_id }, content));
 }

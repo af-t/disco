@@ -1,8 +1,11 @@
 import tools from '../lib/utility.js';
+import { moderateDisallowedLink } from '../lib/anti-link.js';
 const { getLogChannel } = tools;
 
 export default async (client, m) => {
   if (!m.guild_id || m.author?.bot) return;
+
+  if (await moderateDisallowedLink(client, m)) return;
 
   const cached = await client.store.get(`${m.channel_id}:${m.id}:old`);
   if (cached && cached.content === m.content) return;
@@ -14,7 +17,7 @@ export default async (client, m) => {
     title: '📝 Message Updated',
     description: `A message by <@${m.author?.id}> was edited in <#${m.channel_id}>`,
     fields: [
-      { name: 'Original Content', value: cached.content || '*Original not in cache*' },
+      { name: 'Original Content', value: cached?.content || '*Original not in cache*' },
       { name: 'New Content', value: m.content || '*No content*' },
     ],
     timestamp: new Date().toISOString(),

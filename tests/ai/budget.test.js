@@ -54,6 +54,38 @@ test('different guilds have isolated counters', async () => {
   assert.equal((await budget.current('g2')).count, 1);
 });
 
+describe('createBudget concurrent increments', () => {
+  function makeDelayedStoreMock() {
+    const data = new Map();
+    return {
+      data,
+      async get(k) {
+        await new Promise((r) => setTimeout(r, 5));
+        return data.get(k);
+      },
+      async set(k, v) {
+        await new Promise((r) => setTimeout(r, 5));
+        data.set(k, v);
+      },
+    };
+  }
+
+  it('does not lose an update when two increments race for the same guild', async () => {
+    const store = makeDelayedStoreMock();
+    const budget = createBudget({ store, limit: 100, clock: () => Date.parse('2026-05-19T10:00:00Z') });
+    await Promise.all([budget.increment('g1'), budget.increment('g1')]);
+    assert.equal((await budget.current('g1')).count, 2);
+  });
+
+  it('serializes increments per guild independently, not globally', async () => {
+    const store = makeDelayedStoreMock();
+    const budget = createBudget({ store, limit: 100, clock: () => Date.parse('2026-05-19T10:00:00Z') });
+    await Promise.all([budget.increment('g1'), budget.increment('g2'), budget.increment('g1'), budget.increment('g2')]);
+    assert.equal((await budget.current('g1')).count, 2);
+    assert.equal((await budget.current('g2')).count, 2);
+  });
+});
+
 describe('createBudget guildId guards', () => {
   it('current returns zero count and null key when guildId is missing', async () => {
     const budget = createBudget({ store: makeStoreMock(), limit: 5 });

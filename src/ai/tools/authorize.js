@@ -1,4 +1,5 @@
 import { formatToolError } from './error.js';
+import { channelScopeError } from './scope.js';
 import permissionFlags from '../../lib/permission.js';
 import utility from '../../lib/utility.js';
 
@@ -6,7 +7,7 @@ const ADMIN = permissionFlags.ADMINISTRATOR;
 
 // Parent-side gate: an action only proceeds if a real admin instructed it.
 export async function authorize(
-  { client, runtime, agentKey },
+  { client, runtime, agentKey, agentContext },
   { channel_id, authorizing_message_id },
   requiredPermission,
 ) {
@@ -16,13 +17,8 @@ export async function authorize(
   const flag = permissionFlags[requiredPermission];
   if (flag == null) return { ok: false, error: `unknown permission ${requiredPermission}` };
 
-  // A channel agent may only act on the channel it is running for.
-  if (typeof agentKey === 'string' && agentKey.startsWith('channel:')) {
-    const activeChannelId = agentKey.slice('channel:'.length);
-    if (activeChannelId !== channel_id) {
-      return { ok: false, error: 'cannot act on a channel outside this conversation' };
-    }
-  }
+  const scopeError = channelScopeError({ agentKey, agentContext }, channel_id);
+  if (scopeError) return { ok: false, error: scopeError };
 
   let guildId = null;
   try {
@@ -32,10 +28,10 @@ export async function authorize(
   if (!guildId) guildId = runtime?._agentGuild?.get?.(`channel:${channel_id}`) ?? null;
   if (!guildId) return { ok: false, error: 'this action is only available in a guild' };
 
-  // Only a message that triggered the current turn can authorize, not any
-  // older admin chatter still sitting in the rolling context buffer.
+  // Only the current turn's messages may authorize.
+  const scopedTriggers = agentKey ? runtime?.getAuthorizableIds?.(agentKey) : null;
   const state = runtime?.channels?.get?.(channel_id);
-  const triggers = state?.authorizableIds;
+  const triggers = scopedTriggers ?? state?.authorizableIds;
   const inTurn = typeof triggers?.has === 'function' && triggers.has(authorizing_message_id);
   if (!inTurn) {
     return { ok: false, error: 'authorizing_message_id is not the instruction that triggered this turn' };
@@ -54,15 +50,16 @@ export async function authorize(
 
   let perms;
   try {
-    const member = await client.getGuildMember(guildId, authorId);
-    perms = await utility.getPermissions(client, guildId, member);
+    const member = await client.getGuildMember(guildId, authorId, { force: true });
+    perms = await utility.getPermissions(client, guildId, member, { force: true });
   } catch (err) {
     return { ok: false, error: `cannot resolve permissions: ${formatToolError(err)}` };
   }
 
-  const authorized = (perms & ADMIN) === ADMIN || (perms & flag) === flag;
+  const isAdmin = (perms & ADMIN) === ADMIN;
+  const authorized = isAdmin || (perms & flag) === flag;
   if (!authorized) {
     return { ok: false, error: `user ${authorId} lacks ${requiredPermission}; only an admin can authorize this` };
   }
-  return { ok: true, guildId, authorizedBy: authorId };
+  return { ok: true, guildId, authorizedBy: authorId, permissions: perms, isAdmin };
 }

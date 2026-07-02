@@ -1,4 +1,5 @@
 import { formatToolError } from './error.js';
+import { guildScopeError } from './scope.js';
 import permissionFlags from '../../lib/permission.js';
 
 function namedPermissions(permsStr) {
@@ -29,9 +30,11 @@ export const definition = {
   },
 };
 
-export async function execute({ client }, { guild_id, role_id }) {
+export async function execute(ctx, { guild_id, role_id }) {
+  const scopeError = guildScopeError(ctx, guild_id);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
   try {
-    const roles = await client.getRoles(guild_id);
+    const roles = await ctx.client.getRoles(guild_id);
     const role = roles.find((r) => r.id === role_id);
     if (!role) return JSON.stringify({ ok: false, error: 'Role not found' });
     return JSON.stringify({

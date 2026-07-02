@@ -289,4 +289,20 @@ describe('purge notice and auto-delete failures', () => {
     await purgeModule.execute(client, msg, []);
     assert.ok(bulkDeleteCalls.length > 0);
   });
+
+  it('caps message_reference mode at MAX_PURGE messages instead of walking unbounded', async () => {
+    const messages = [];
+    for (let i = 0; i < 1500; i++) {
+      messages.push({ id: `80000000000${String(i).padStart(7, '0')}`, timestamp: new Date().toISOString() });
+    }
+    const bulkDeleteCalls = [];
+    const deleteCalls = [];
+    const client = createMockClient({ messages, bulkDeleteCalls, deleteCalls });
+    const msg = createMockMessage({ message_reference: { message_id: '700000000000000000' } });
+    await purgeModule.execute(client, msg, []);
+
+    const walkedDeleted = bulkDeleteCalls.reduce((sum, chunk) => sum + chunk.length, 0) + deleteCalls.length;
+    // +1 accounts for the always-included referenced message itself
+    assert.ok(walkedDeleted <= 1001, `expected a capped delete count, got ${walkedDeleted}`);
+  });
 });

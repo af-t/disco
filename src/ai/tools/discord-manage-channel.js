@@ -1,5 +1,6 @@
 import { withToolErrorHandling } from './error.js';
 import { authorize } from './authorize.js';
+import { targetChannelGuildError } from './scope.js';
 
 export const definition = {
   name: 'discord_manage_channel',
@@ -30,16 +31,22 @@ export async function execute(ctx, input) {
         const created = await ctx.client.createChannel(auth.guildId, input.options ?? {});
         return JSON.stringify({ ok: true, channel_id: created?.id ?? null });
       }
-      case 'edit':
+      case 'edit': {
         if (!input.target_channel_id)
           return JSON.stringify({ ok: false, error: 'target_channel_id required for edit' });
+        const scopeError = await targetChannelGuildError(ctx, input.target_channel_id, auth.guildId);
+        if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
         await ctx.client.editChannel(input.target_channel_id, input.options ?? {});
         return JSON.stringify({ ok: true });
-      case 'delete':
+      }
+      case 'delete': {
         if (!input.target_channel_id)
           return JSON.stringify({ ok: false, error: 'target_channel_id required for delete' });
+        const scopeError = await targetChannelGuildError(ctx, input.target_channel_id, auth.guildId);
+        if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
         await ctx.client.deleteChannel(input.target_channel_id);
         return JSON.stringify({ ok: true });
+      }
       default:
         return JSON.stringify({ ok: false, error: `unknown action ${input.action}` });
     }

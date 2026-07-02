@@ -7,6 +7,7 @@ function utcDateKey(ms) {
 
 export function createBudget({ store, limit, clock = () => Date.now() }) {
   const keyFor = (guildId) => `ai_budget:${guildId}:${utcDateKey(clock())}`;
+  const guildQueues = new Map();
 
   async function current(guildId) {
     if (!guildId) return { count: 0, key: null };
@@ -15,10 +16,18 @@ export function createBudget({ store, limit, clock = () => Date.now() }) {
     return { count: v?.count ?? 0, key: k };
   }
 
+  // Chain increments per guild so a racing read-then-write never loses a count.
   async function increment(guildId) {
     if (!guildId) return;
-    const { count, key } = await current(guildId);
-    await store.set(key, { count: count + 1, updated: clock() }, { isCache: true, ttl: TTL_MS });
+    const run = (guildQueues.get(guildId) ?? Promise.resolve()).then(async () => {
+      const { count, key } = await current(guildId);
+      await store.set(key, { count: count + 1, updated: clock() }, { isCache: true, ttl: TTL_MS });
+    });
+    guildQueues.set(
+      guildId,
+      run.catch(() => {}),
+    );
+    return run;
   }
 
   async function exhausted(guildId) {

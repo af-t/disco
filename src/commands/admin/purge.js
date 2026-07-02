@@ -3,6 +3,7 @@ import utility from '../../lib/utility.js';
 const { unrefTimeout } = utility;
 
 const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
+const MAX_PURGE = 1000;
 
 const execute = async (client, message, args) => {
   const messagesToDelete = [];
@@ -11,12 +12,15 @@ const execute = async (client, message, args) => {
   if (message.message_reference) {
     let messages;
     let after = message.message_reference.message_id;
+    let remain = MAX_PURGE;
 
     do {
-      messages = await client.getMessages(message.channel_id, { after, limit: 100 });
-      messagesToDelete.push(...filter(messages));
+      messages = await client.getMessages(message.channel_id, { after, limit: Math.min(remain, 100) });
+      const filteredMsgs = filter(messages);
+      messagesToDelete.push(...filteredMsgs);
+      remain -= filteredMsgs.length;
       after = messages.at(-1)?.id;
-    } while (messages.length === 100 && after);
+    } while (messages.length === 100 && after && remain > 0);
 
     messagesToDelete.push({ id: message.message_reference.message_id });
   } else {
@@ -28,7 +32,6 @@ const execute = async (client, message, args) => {
       );
     }
 
-    const MAX_PURGE = 1000;
     const adjustedCount = Math.min(count, MAX_PURGE);
     if (count > MAX_PURGE) {
       client

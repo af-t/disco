@@ -184,13 +184,20 @@ class StoreClient extends StoreBase {
           // fall back to server when memory missed
           if (!meta || meta.location === LOCATION.SERVER) {
             try {
-              const value = await this._send('get', [key]);
+              const response = await this._send('getWithMetadata', [key]);
+              // real value+metadata shape, vs. a legacy plain-value response
+              const hasMetadataShape =
+                response && typeof response === 'object' && !Array.isArray(response) && 'value' in response;
+              const value = hasMetadataShape ? response.value : response;
+              const serverMeta = hasMetadataShape ? response.metadata : null;
+
               if (value !== undefined && value !== null) {
                 this._stats.cache.promotions++;
                 const newMeta = meta ?? {
                   created: Date.now(),
-                  isCache: true,
-                  customTTL: null,
+                  // an old server with no metadata endpoint: guess cache (legacy behavior)
+                  isCache: serverMeta ? !!serverMeta.isCache : true,
+                  customTTL: serverMeta ? (serverMeta.customTTL ?? null) : null,
                   lastAccess: Date.now(),
                   accessCount: 0,
                   location: LOCATION.MEMORY,

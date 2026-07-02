@@ -222,8 +222,8 @@ function getAvatarUrl(user) {
     : `https://cdn.discordapp.com/embed/avatars/${user.discriminator && user.discriminator !== '0' ? Number(user.discriminator) % 5 : Number((BigInt(user.id) >> 22n) % 6n)}.png`;
 }
 
-async function getPermissions(client, guild_id, member) {
-  const guildRoles = await client.getRoles(guild_id);
+async function getPermissions(client, guild_id, member, options = {}) {
+  const guildRoles = await client.getRoles(guild_id, options);
   if (!guildRoles) return 0n;
 
   const everyoneRole = guildRoles.find((r) => r.id === guild_id);

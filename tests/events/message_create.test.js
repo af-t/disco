@@ -682,6 +682,27 @@ describe('message_create permission check', () => {
     await handleMessage(client, createMockMessage({ content: '.ban someone', guild_id: undefined }));
     assert.ok(replies.some((r) => r.includes('permission')));
   });
+
+  it('denies a mixed-case command invocation when the user lacks the role', async () => {
+    const replies = [];
+    const executed = [];
+    const client = createMockClient();
+    client.commands.ban = Object.assign(
+      async () => {
+        executed.push(1);
+      },
+      { permissions: ['BAN_MEMBERS'] },
+    );
+    client.reply = async (m, content) => {
+      replies.push(typeof content === 'string' ? content : JSON.stringify(content));
+    };
+    client.getRoles = async () => [{ id: 'r1', permissions: '0' }];
+    client.getGuildMember = async () => ({ roles: ['r1'] });
+
+    await handleMessage(client, createMockMessage({ content: '.Ban someone' }));
+    assert.strictEqual(executed.length, 0);
+    assert.ok(replies.some((r) => r.includes('permission')));
+  });
 });
 
 // ── naturalMode DM ─────────────────────────────────────────────────────────────

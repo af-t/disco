@@ -1,6 +1,7 @@
 import permissionFlags from '../lib/permission.js';
 import tools from '../lib/utility.js';
 import { checkRateLimit, getMaxPerSec } from '../lib/event_utils.js';
+import { moderateDisallowedLink } from '../lib/anti-link.js';
 
 const { formatAgo, getPermissions, unrefTimeout } = tools;
 const COMMAND_PREFIX = '.';
@@ -89,73 +90,7 @@ export default async (client, m) => {
   // Auto-moderation logic
   if (isGuildMessage) {
     // 1. Anti-link (ignore for admins/moderators)
-    const ALLOWED_DOMAINS = [
-      'discord.com',
-      'discord.gg',
-      'discordapp.com',
-      'discordapp.net',
-      'cdn.discordapp.com',
-      'media.discordapp.net',
-      'tenor.com',
-      'giphy.com',
-      'imgur.com',
-      'github.com',
-      'gitlab.com',
-      'bitbucket.org',
-      'youtube.com',
-      'youtu.be',
-      'twitch.tv',
-      'spotify.com',
-      'x.com',
-      'twitter.com',
-      'reddit.com',
-      'medium.com',
-      'stackoverflow.com',
-      'stackexchange.com',
-      'npmjs.com',
-      'docs.python.org',
-      'nodejs.org',
-      'canva.com',
-      'drive.google.com',
-      'docs.google.com',
-    ];
-
-    const urlRegex = /https?:\/\/([^\s/?#]+)/gi;
-    const urls = m.content?.match(urlRegex);
-    if (urls) {
-      const hasDisallowedLink = urls.some((url) => {
-        try {
-          const hostname = new URL(url).hostname.replace(/^www\./, '');
-          return !ALLOWED_DOMAINS.some((allowed) => hostname === allowed || hostname.endsWith('.' + allowed));
-        } catch {
-          return true; // Invalid URL, treat as disallowed
-        }
-      });
-
-      if (hasDisallowedLink) {
-        const member = m.member || (await client.getGuildMember(m.guild_id, m.author.id));
-        const perms = await getPermissions(client, m.guild_id, member);
-        const isMod =
-          (perms & permissionFlags.ADMINISTRATOR) === permissionFlags.ADMINISTRATOR ||
-          (perms & permissionFlags.MANAGE_MESSAGES) === permissionFlags.MANAGE_MESSAGES; // Admin or Manage Messages
-
-        if (!isMod) {
-          await client.deleteMessage(m.channel_id, m.id);
-          const warn = await client.sendMessage(
-            m.channel_id,
-            `🚫 **${m.author.username}**, posting links is not allowed here!`,
-          );
-          unrefTimeout(
-            () =>
-              client
-                .deleteMessage(m.channel_id, warn.id)
-                .catch((err) => client.logger?.warn?.('Failed to delete link warning:', err)),
-            5000,
-          );
-          return;
-        }
-      }
-    }
+    if (await moderateDisallowedLink(client, m)) return;
 
     // 2. Anti-spam (repetitive content) - with normalization (fixes M2)
     const normalizeContent = (str) => str?.trim().toLowerCase().replace(/\s+/g, ' ') ?? '';
@@ -255,7 +190,7 @@ export default async (client, m) => {
 
     let allow = true;
 
-    if (client.commands[cmd]?.permissions?.length) {
+    if (client.commands[cmdLower]?.permissions?.length) {
       if (isGuildMessage) {
         const member = m.member || (await client.getGuildMember(m.guild_id, m.author.id));
         if (!member?.roles) {
@@ -269,7 +204,7 @@ export default async (client, m) => {
             allow = true;
           } else {
             // Use Array.every() for clean permission checking (fixes C2)
-            allow = client.commands[cmd].permissions.every((permName) => {
+            allow = client.commands[cmdLower].permissions.every((permName) => {
               const flag = permissionFlags[permName];
               if (!flag) {
                 client.logger.warn(`Unknown permission "${permName}" from command:`, cmd);

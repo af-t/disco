@@ -63,8 +63,8 @@ class DiscordClient extends level1 {
     throw new Error(`Request failed after ${MAX_RETRIES} attempt(s)`);
   }
 
-  async _cacheableGet(endpoint) {
-    let cached = await this.store.get(endpoint);
+  async _cacheableGet(endpoint, options = {}) {
+    let cached = options.force ? null : await this.store.get(endpoint);
     if (!cached) {
       cached = await this.makeRequest('GET', endpoint);
       await this.store.set(endpoint, cached, true);
@@ -148,8 +148,9 @@ class DiscordClient extends level1 {
   }
 
   async getGuild(guild_id, options = {}) {
-    const params = new URLSearchParams(options);
-    return this._cacheableGet(`/guilds/${guild_id}?${params}`);
+    const { force, ...queryParams } = options;
+    const params = new URLSearchParams(queryParams);
+    return this._cacheableGet(`/guilds/${guild_id}?${params}`, { force });
   }
 
   async getGuildPreview(guild_id) {
@@ -176,8 +177,8 @@ class DiscordClient extends level1 {
     return this._cacheableGet(`/webhooks/${webhook_id}`);
   }
 
-  async getRoles(guild_id) {
-    return this._cacheableGet(`/guilds/${guild_id}/roles`);
+  async getRoles(guild_id, options = {}) {
+    return this._cacheableGet(`/guilds/${guild_id}/roles`, options);
   }
 
   async createRole(guild_id, options = {}) {
@@ -192,8 +193,8 @@ class DiscordClient extends level1 {
     return this.makeRequest('DELETE', `/guilds/${guild_id}/roles/${role_id}`);
   }
 
-  async getGuildMember(guild_id, user_id) {
-    return this._cacheableGet(`/guilds/${guild_id}/members/${user_id}`);
+  async getGuildMember(guild_id, user_id, options = {}) {
+    return this._cacheableGet(`/guilds/${guild_id}/members/${user_id}`, options);
   }
 
   async editGuildMember(guild_id, user_id, options = {}, reason) {
