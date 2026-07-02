@@ -1,5 +1,5 @@
 import { getRecentCases, getCasesByUser } from '../../lib/case.js';
-import { extractUserID } from './adminUtils.js';
+import { extractUserID } from '../../lib/adminUtils.js';
 
 const execute = async (client, message, args) => {
   const guildId = message.guild_id;

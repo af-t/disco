@@ -1,6 +1,6 @@
 import { createCase } from '../../lib/case.js';
 import { postModLog } from '../../lib/modlog.js';
-import { extractUserID } from './adminUtils.js';
+import { extractUserID } from '../../lib/adminUtils.js';
 
 const execute = async (client, message, args) => {
   let memberId = extractUserID(args[0]);

@@ -1,6 +1,6 @@
 import { createCase, resolveCase, getCasesByUser } from '../../lib/case.js';
 import { postModLog } from '../../lib/modlog.js';
-import { parseModCommandArgs } from './adminUtils.js';
+import { parseModCommandArgs } from '../../lib/adminUtils.js';
 
 const execute = async (client, message, args) => {
   let response;

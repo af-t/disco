@@ -1,22 +1,15 @@
-import { formatToolError } from './error.js';
-import { guildScopeError } from './scope.js';
+import { executeGuildScoped, guildIdOnlyInputSchema } from './scope.js';
 const MAX_CHANNELS = 50;
 
 export const definition = {
   name: 'discord_get_guild',
   description:
     'Fetch metadata about a Discord guild (server): name, owner, member count, and a capped list of channels.',
-  input_schema: {
-    type: 'object',
-    properties: { guild_id: { type: 'string' } },
-    required: ['guild_id'],
-  },
+  input_schema: guildIdOnlyInputSchema,
 };
 
 export async function execute(ctx, { guild_id }) {
-  const scopeError = guildScopeError(ctx, guild_id);
-  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
-  try {
+  return executeGuildScoped(ctx, guild_id, async () => {
     const guild = await ctx.client.getGuild(guild_id);
     let channels = [];
     try {
@@ -35,7 +28,5 @@ export async function execute(ctx, { guild_id }) {
         channels,
       },
     });
-  } catch (err) {
-    return JSON.stringify({ ok: false, error: formatToolError(err) });
-  }
+  });
 }

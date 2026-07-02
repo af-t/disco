@@ -1,6 +1,6 @@
-import { createCase } from '../../lib/case.js';
-import { postModLog } from '../../lib/modlog.js';
-import { assertCanModerateMember } from '../../lib/role-hierarchy.js';
+import { createCase } from './case.js';
+import { postModLog } from './modlog.js';
+import { assertCanModerateMember } from './role-hierarchy.js';
 export function extractUserID(input) {
   if (!input || typeof input !== 'string') return;
   let id = input.match(/<@!?(\d+)>/)?.[1];

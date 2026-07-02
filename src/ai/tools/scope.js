@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withToolErrorHandling } from './error.js';
 
 function isOutside(base, target) {
   const rel = path.relative(base, target);
@@ -22,12 +23,26 @@ export function channelScopeError(ctx, channelId) {
   return null;
 }
 
+// Shared by tools that take only a guild_id (e.g. discord_get_guild, discord_list_expressions).
+export const guildIdOnlyInputSchema = Object.freeze({
+  type: 'object',
+  properties: { guild_id: { type: 'string' } },
+  required: ['guild_id'],
+});
+
 export function guildScopeError(ctx, guildId) {
   if (!guildId) return 'guild_id is required';
   const expected = ctx?.agentContext?.guildId;
   if (expected && expected !== guildId) return 'cannot act on a guild outside this conversation';
   if (ctx?.agentContext && !expected) return 'this action is only available in a guild conversation';
   return null;
+}
+
+// Checks guild scope, then runs handler with error formatting. Shared by read-only guild tools.
+export function executeGuildScoped(ctx, guildId, handler) {
+  const scopeError = guildScopeError(ctx, guildId);
+  if (scopeError) return JSON.stringify({ ok: false, error: scopeError });
+  return withToolErrorHandling(handler);
 }
 
 export async function sameGuildChannelError(ctx, channelId) {

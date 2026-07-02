@@ -1,4 +1,4 @@
-import { executeModAction } from './adminUtils.js';
+import { executeModAction } from '../../lib/adminUtils.js';
 
 const execute = async (client, message, args) => {
   await executeModAction(client, message, args, 'unban', 'Unbanned', async (uid, reason) =>
