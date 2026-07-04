@@ -42,7 +42,7 @@
     "node": ">=22.3.0"
   },
   "dependencies": {
-    "@af-t/agent-sdk": "git+https://github.com/af-t/agent-sdk.git#v3.2.2",
+    "@af-t/agent-sdk": "git+https://github.com/af-t/agent-sdk.git#v3.2.5",
     "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.21.0"
