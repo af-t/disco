@@ -77,29 +77,22 @@ A modular and extendable Discord bot built with Node.js, designed for server man
    | `DISCORD_RECONNECT_LIMIT` | No    | `5`                              | Max reconnect attempts before giving up |
    | `DISCORD_MAX_RETRIES` | No       | `3`                              | Max API request retries |
 
-4. **Start the bot**:
+4. **Start the app**:
 
-   The bot and its persistent store run as two separate processes. Start them in order:
+   The native launcher starts the persistent store first and then the bot. It restarts either process after an unexpected exit and stops both when it receives `SIGINT` or `SIGTERM`.
 
    ```bash
-   # Terminal 1 — store server (disk persistence)
-   npm run serve
-
-   # Terminal 2 — bot
    npm start
    ```
 
-   The bot will start without the store server (memory-only mode), but persisted state (mod cases, log channel config, etc.) will be lost on restart.
-
-   **Production (PM2):** `ecosystem.config.cjs` manages both processes together:
+   To run either process separately during development:
 
    ```bash
-   npm run pm2:start    # start both disco-store and disco-bot
-   npm run pm2:logs     # tail combined logs
-   npm run pm2:status   # inspect process state
-   npm run pm2:restart  # rolling restart
-   npm run pm2:stop     # stop both
+   npm run serve       # store only
+   npm run start:bot   # bot only
    ```
+
+   The bot will start without the store server (memory-only mode), but persisted state (mod cases, log channel config, etc.) will be lost on restart.
 
 ## 🤖 Natural AI Mode
 

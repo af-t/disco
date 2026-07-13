@@ -6,19 +6,14 @@
   "type": "module",
   "scripts": {
     "test": "node --experimental-test-module-mocks --test",
-    "start": "node src/index.js",
+    "start": "node script/start-app.js",
+    "start:bot": "node src/index.js",
     "serve": "node src/store/server.js",
     "lint": "eslint '**/*.js'",
     "lint:fix": "eslint --fix '**/*.js'",
     "format": "prettier --check '**/*.js'",
     "format:fix": "prettier --write '**/*.js'",
-    "check": "npm run lint && npm run format && npm test",
-    "pm2:start": "pm2 start ecosystem.config.cjs",
-    "pm2:stop": "pm2 stop ecosystem.config.cjs",
-    "pm2:restart": "pm2 restart ecosystem.config.cjs",
-    "pm2:delete": "pm2 delete ecosystem.config.cjs",
-    "pm2:logs": "pm2 logs",
-    "pm2:status": "pm2 status"
+    "check": "npm run lint && npm run format && npm test"
   },
   "repository": {
     "type": "git",
@@ -52,13 +47,6 @@
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.7.0",
-    "pm2": "^7.0.1",
     "prettier": "^3.9.1"
-  },
-  "overrides": {
-    "pm2": {
-      "js-yaml": "^4.1.2",
-      "ws": "^8.21.0"
-    }
   }
 }
