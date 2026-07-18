@@ -126,7 +126,11 @@ export function startApp({ processRef = process, loadEnvFileFn = process.loadEnv
     loadEnvFileFn(join(PROJECT_ROOT, '.env'));
   } catch {}
 
-  const supervisor = new AppSupervisor(supervisorOptions);
+  const apps =
+    processRef.env?.START_STORE_SERVER === 'false'
+      ? APP_DEFINITIONS.filter(({ name }) => name !== 'store')
+      : APP_DEFINITIONS;
+  const supervisor = new AppSupervisor({ apps, ...supervisorOptions });
   supervisor.start();
   installSignalHandlers(supervisor, processRef);
   return supervisor;

@@ -187,6 +187,24 @@ describe('startApp', () => {
     );
     assert.equal(fork.calls.length, 2);
   });
+
+  it('starts only the bot when START_STORE_SERVER is false', () => {
+    const fork = createFork();
+    const processRef = new EventEmitter();
+    processRef.env = { START_STORE_SERVER: 'false' };
+    processRef.exit = () => {};
+
+    startApp({
+      processRef,
+      loadEnvFileFn: () => {},
+      supervisorOptions: { forkFn: fork.forkFn, logger: silentLogger },
+    });
+
+    assert.deepEqual(
+      fork.calls.map(({ script }) => script),
+      [APP_DEFINITIONS[1].script],
+    );
+  });
 });
 
 describe('installSignalHandlers', () => {

@@ -70,6 +70,25 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
+    if (op === 'set-attr') {
+      const [attributeName, value] = args;
+      if (typeof attributeName !== 'string' || attributeName.length === 0) {
+        throw new TypeError('Attribute name must be a non-empty string');
+      }
+      store[attributeName] = value;
+      ws.send(serialize({ id, data: true }));
+      return;
+    }
+
+    if (op === 'get-attr') {
+      const [attributeName] = args;
+      if (typeof attributeName !== 'string' || attributeName.length === 0) {
+        throw new TypeError('Attribute name must be a non-empty string');
+      }
+      ws.send(serialize({ id, data: store[attributeName] }));
+      return;
+    }
+
     if (op in store && typeof store[op] === 'function') {
       let data;
       try {
@@ -77,17 +96,6 @@ wss.on('connection', (ws, req) => {
       } finally {
         ws.send(serialize({ id, data }));
       }
-      return;
-    }
-
-    if (op === 'set-attr') {
-      store[op] = args;
-      ws.send(serialize({ id, data: args }));
-      return;
-    }
-
-    if (op === 'get-attr') {
-      ws.send(serialize({ id, data: store[op] }));
       return;
     }
   });

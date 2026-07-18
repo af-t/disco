@@ -46,7 +46,7 @@ A modular and extendable Discord bot built with Node.js, designed for server man
    | Variable              | Required | Default                          | Description |
    |-----------------------|----------|----------------------------------|-------------|
    | `DISCORD_TOKEN`       | Yes      | —                                | Your Discord bot token |
-   | `STORE_SERVER_URL`    | No       | `http://localhost:3000`          | URL of the internal store server (bot runs in memory-only mode if unreachable) |
+   | `STORE_SERVER_URL`    | No       | `ws://localhost:3000`            | URL of the internal store server (bot runs in memory-only mode if unreachable) |
    | `STORE_SERVER_PORT`   | No       | `3000`                           | Port for the store server |
    | `OPENROUTER_API_KEY`  | No       | —                                | OpenRouter API key (for AI commands) |
    | `OPENROUTER_MODEL`    | No       | `google/gemini-2.0-flash-001`    | AI model to use for the agent |
