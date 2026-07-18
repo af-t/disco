@@ -2,7 +2,7 @@ import { afterEach, describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
-import { APP_DEFINITIONS, AppSupervisor, installSignalHandlers, startApp } from '../../script/start-app.js';
+import { APP_DEFINITIONS, AppSupervisor, installSignalHandlers, startApp } from '../../scripts/start-app.js';
 
 const projectRoot = join(import.meta.dirname, '..', '..');
 const silentLogger = { info() {}, warn() {}, error() {} };

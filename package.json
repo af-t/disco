@@ -1,12 +1,12 @@
 {
   "name": "disco",
-  "version": "1.7.5",
+  "version": "1.0.0",
   "description": "Discord bot application.",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
     "test": "node --experimental-test-module-mocks --test",
-    "start": "node script/start-app.js",
+    "start": "node scripts/start-app.js",
     "start:bot": "node src/index.js",
     "serve": "node src/store/server.js",
     "lint": "eslint '**/*.js'",
@@ -38,7 +38,6 @@
   },
   "dependencies": {
     "@af-t/agent-sdk": "git+https://github.com/af-t/agent-sdk.git#v3.2.5",
-    "opusscript": "^0.1.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.21.0"
   },
