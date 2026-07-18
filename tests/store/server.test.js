@@ -21,9 +21,9 @@ class FakeEngine {
   }
 }
 
-mock.module('../../src/store/engine.js', { exports: { default: FakeEngine } });
+mock.module('../../src/store/engine.js', { defaultExport: FakeEngine });
 mock.module('node:http', {
-  exports: {
+  namedExports: {
     createServer() {
       return {
         listen() {},
@@ -36,7 +36,7 @@ mock.module('node:http', {
   },
 });
 mock.module('ws', {
-  exports: {
+  namedExports: {
     WebSocketServer: class {
       constructor() {}
 

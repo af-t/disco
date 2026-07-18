@@ -328,7 +328,7 @@ class StoreClient extends StoreBase {
         .then(() => this._ws?.readyState === this._WebSocketImpl.OPEN)
         .catch(() => false),
       new Promise((resolve) => {
-        timeoutId = unrefTimeout(() => resolve(false), timeoutMs);
+        timeoutId = setTimeout(() => resolve(false), timeoutMs);
       }),
     ]);
     clearTimeout(timeoutId);
@@ -352,7 +352,7 @@ class StoreClient extends StoreBase {
     if (this._ws?.readyState === this._WebSocketImpl.OPEN) return;
     let timeoutId;
     const timeout = new Promise((resolve) => {
-      timeoutId = unrefTimeout(resolve, timeoutMs);
+      timeoutId = setTimeout(resolve, timeoutMs);
     });
     try {
       await Promise.race([Promise.resolve(this._ensureConnected()).catch(() => {}), timeout]);

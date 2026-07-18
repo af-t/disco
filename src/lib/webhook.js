@@ -2,9 +2,6 @@ import https from 'node:https';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { basename } from 'node:path';
-import utility from './utility.js';
-
-const { unrefTimeout } = utility;
 
 class DiscordWebhookTools {
   static MAX_RETRIES = 3;
@@ -61,12 +58,12 @@ class DiscordWebhookTools {
 
     if (now < this.#resetTime) {
       const delay = this.#resetTime - now;
-      await new Promise((resolve) => unrefTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
     if (this.#remainingRequests <= 0) {
       const delay = Math.max(0, this.#resetTime - now);
-      await new Promise((resolve) => unrefTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 
@@ -140,7 +137,7 @@ class DiscordWebhookTools {
           } else if (res.statusCode === 429 && retryCount < DiscordWebhookTools.MAX_RETRIES) {
             // Rate limited - retry after delay
             const retryAfter = parseInt(res.headers['retry-after'] ?? '1000');
-            unrefTimeout(() => {
+            setTimeout(() => {
               this.sendRawRequest(data, options, retryCount + 1)
                 .then(resolve)
                 .catch(reject);
@@ -153,7 +150,7 @@ class DiscordWebhookTools {
 
       const handleFailure = (err) => {
         if (retryCount < DiscordWebhookTools.MAX_RETRIES) {
-          unrefTimeout(() => {
+          setTimeout(() => {
             this.sendRawRequest(data, options, retryCount + 1)
               .then(resolve)
               .catch(reject);
