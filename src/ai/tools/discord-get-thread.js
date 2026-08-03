@@ -4,7 +4,7 @@ export const definition = {
   name: 'discord_get_thread',
   description:
     'Fetch metadata about a Discord thread (treated as a channel by the API): name, parent, archive/lock state, message count.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: { thread_id: { type: 'string' } },
     required: ['thread_id'],

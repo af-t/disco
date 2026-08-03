@@ -5,7 +5,7 @@ export const definition = {
   name: 'discord_delete_message',
   description:
     'Delete a single message in this channel. Moderation action: only valid when an admin/mod with MANAGE_MESSAGES instructed it in chat; pass their instruction id as authorizing_message_id.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string', description: 'Channel where the instruction was given and the target lives.' },

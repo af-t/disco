@@ -5,7 +5,7 @@ export const definition = {
   name: 'discord_get_guild',
   description:
     'Fetch metadata about a Discord guild (server): name, owner, member count, and a capped list of channels.',
-  input_schema: guildIdOnlyInputSchema,
+  inputSchema: guildIdOnlyInputSchema,
 };
 
 export async function execute(ctx, { guild_id }) {

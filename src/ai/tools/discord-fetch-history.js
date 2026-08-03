@@ -7,7 +7,7 @@ export const definition = {
   name: 'discord_fetch_history',
   description:
     'Fetch recent messages from a Discord channel (older than your rolling buffer). Use sparingly — only when needed for context.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

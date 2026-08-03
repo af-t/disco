@@ -10,7 +10,7 @@ describe('tools registry', () => {
     for (const def of TOOL_DEFINITIONS) {
       assert.equal(typeof def.name, 'string');
       assert.equal(typeof def.description, 'string');
-      assert.equal(def.input_schema.type, 'object');
+      assert.equal(def.inputSchema.type, 'object');
     }
   });
 

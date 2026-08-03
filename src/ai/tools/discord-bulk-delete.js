@@ -17,7 +17,7 @@ export const definition = {
   name: 'discord_bulk_delete',
   description:
     'Bulk-delete 2 to 100 recent messages (younger than 14 days) in this channel. Moderation action requiring MANAGE_MESSAGES; pass the admin instruction as authorizing_message_id.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

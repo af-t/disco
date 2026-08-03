@@ -5,7 +5,7 @@ export const definition = {
   name: 'discord_list_expressions',
   description:
     'List the custom emojis and stickers available in a guild, with their ids. Use before discord_send_sticker, or to use a custom emoji in text (format <:name:id> or <a:name:id> for animated).',
-  input_schema: guildIdOnlyInputSchema,
+  inputSchema: guildIdOnlyInputSchema,
 };
 
 export async function execute(ctx, { guild_id }) {

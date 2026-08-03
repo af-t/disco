@@ -6,7 +6,7 @@ export const definition = {
   name: 'discord_manage_role',
   description:
     'Create, edit, or delete a role, or assign/unassign a role to a member. Admin action requiring MANAGE_ROLES; pass the admin instruction as authorizing_message_id.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

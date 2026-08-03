@@ -6,7 +6,7 @@ export const definition = {
   name: 'discord_read',
   description:
     'Read the full content of a specific Discord message. Use when you need a referenced message that is not in your buffer.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

@@ -4,7 +4,7 @@ export const definition = {
   name: 'discord_send_embed',
   description:
     'Send a rich embed (title, description, fields, color, image, thumbnail, footer) to a channel, optionally with leading text. Use for structured or visually distinct messages.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

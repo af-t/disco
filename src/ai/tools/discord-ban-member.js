@@ -5,7 +5,7 @@ export const definition = {
   name: 'discord_ban_member',
   description:
     'Ban a member from the guild. Moderation action requiring BAN_MEMBERS; pass the admin instruction as authorizing_message_id.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

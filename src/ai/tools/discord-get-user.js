@@ -13,7 +13,7 @@ function sanitizeMember(m) {
 export const definition = {
   name: 'discord_get_user',
   description: 'Fetch a Discord user profile. Optionally include their roles in a specific guild.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       user_id: { type: 'string' },

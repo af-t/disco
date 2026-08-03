@@ -40,7 +40,7 @@ export function standardModActionSchema(name, description) {
   return {
     name,
     description,
-    input_schema: {
+    inputSchema: {
       type: 'object',
       properties: {
         channel_id: { type: 'string' },

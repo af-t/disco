@@ -4,7 +4,7 @@ export const definition = {
   name: 'discord_send',
   description:
     'Send a new message to a Discord channel you have access to. Use for fresh statements not tied to a specific reply target.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string', description: 'Target channel ID.' },

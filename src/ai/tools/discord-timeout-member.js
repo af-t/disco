@@ -8,7 +8,7 @@ export const definition = {
   name: 'discord_timeout_member',
   description:
     'Time out (mute) a member so they cannot chat or speak, for a duration. Moderation action requiring MODERATE_MEMBERS; pass the admin instruction as authorizing_message_id.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

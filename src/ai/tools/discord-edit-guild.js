@@ -5,7 +5,7 @@ export const definition = {
   name: 'discord_edit_guild',
   description:
     'Edit guild (server) settings. Admin action requiring MANAGE_GUILD; pass the admin instruction as authorizing_message_id.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

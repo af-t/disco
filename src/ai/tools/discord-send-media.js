@@ -4,7 +4,7 @@ export const definition = {
   name: 'discord_send_media',
   description:
     'Send a GIF, image, or file to a channel by direct media URL or local path (uploaded as an attachment). Optionally include text. For a Tenor/Giphy share link that should unfurl, use discord_send with the link in the content instead.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

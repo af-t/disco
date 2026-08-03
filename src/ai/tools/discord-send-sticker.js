@@ -4,7 +4,7 @@ export const definition = {
   name: 'discord_send_sticker',
   description:
     'Send one to three stickers (by sticker id) to a channel, optionally with text. Call discord_list_expressions first to find available sticker ids.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string' },

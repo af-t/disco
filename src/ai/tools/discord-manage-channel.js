@@ -6,7 +6,7 @@ export const definition = {
   name: 'discord_manage_channel',
   description:
     'Create, edit, or delete a channel. Admin action requiring MANAGE_CHANNELS; pass the admin instruction as authorizing_message_id.',
-  input_schema: {
+  inputSchema: {
     type: 'object',
     properties: {
       channel_id: { type: 'string', description: 'Channel where the instruction was given (for authorization).' },
