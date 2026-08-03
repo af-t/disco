@@ -4,6 +4,15 @@ const { unrefTimeout } = utility;
 
 const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
 const MAX_PURGE = 1000;
+const DISCORD_EPOCH = 1420070400000n;
+
+const ageMs = (id) => {
+  try {
+    return Date.now() - Number((BigInt(id) >> 22n) + DISCORD_EPOCH);
+  } catch {
+    return null;
+  }
+};
 
 const execute = async (client, message, args) => {
   const messagesToDelete = [];
@@ -22,7 +31,9 @@ const execute = async (client, message, args) => {
       after = messages.at(-1)?.id;
     } while (messages.length === 100 && after && remain > 0);
 
-    messagesToDelete.push({ id: message.message_reference.message_id });
+    const refId = message.message_reference.message_id;
+    const refAge = ageMs(refId);
+    if (refAge == null || refAge < twoWeeksMs) messagesToDelete.push({ id: refId });
   } else {
     const count = Number(args[0]);
     if (isNaN(count) || count < 1 || !Number.isInteger(count)) {

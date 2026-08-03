@@ -128,6 +128,34 @@ test('purge should handle message_reference mode', async () => {
   assert.ok(true, 'Should handle message_reference mode');
 });
 
+test('purge should skip a referenced message older than 14 days instead of bulk-deleting it', async () => {
+  const DISCORD_EPOCH = 1420070400000n;
+  const snowflakeFromDate = (date) => ((BigInt(date.getTime()) - DISCORD_EPOCH) << 22n).toString();
+
+  const oldRefId = snowflakeFromDate(new Date(Date.now() - 15 * 24 * 60 * 60 * 1000));
+  const recentMsg = { id: '800000000000000002', timestamp: new Date().toISOString() };
+
+  const bulkDeleteCalls = [];
+  const deleteCalls = [];
+  const client = createMockClient({ bulkDeleteCalls, deleteCalls });
+  let calls = 0;
+  client.getMessages = async () => {
+    calls += 1;
+    return calls === 1 ? [recentMsg] : [];
+  };
+
+  const msg = createMockMessage({ message_reference: { message_id: oldRefId } });
+
+  await purgeModule.execute(client, msg, []);
+
+  const allDeletedIds = [...deleteCalls, ...bulkDeleteCalls.flat()];
+  assert.ok(
+    !allDeletedIds.includes(oldRefId),
+    'Message older than 14 days must not be queued for deletion (would trigger Discord error 50034)',
+  );
+  assert.ok(allDeletedIds.includes(recentMsg.id), 'Recent message should still be deleted');
+});
+
 // ─── Old Message Filtering ────────────────────────────────
 
 test('purge should filter out messages older than 14 days', async () => {
