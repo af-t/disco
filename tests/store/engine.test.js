@@ -249,6 +249,8 @@ async function cleanupEngineMock(engine, diskPath) {
   mock.restoreAll();
   engine._active = false;
   engine._notifier?.();
+  clearTimeout(engine._maintainerTimer);
+  engine._maintainerWake?.();
   await fs.rm(diskPath, { recursive: true, force: true });
 }
 
@@ -627,6 +629,8 @@ describe('StoreEngine durability: atomic writes', () => {
       mock.restoreAll();
       engine._active = false;
       engine._notifier?.();
+      clearTimeout(engine._maintainerTimer);
+      engine._maintainerWake?.();
       await fs.rm(diskPath, { recursive: true, force: true });
     }
   });
@@ -658,6 +662,8 @@ describe('StoreEngine durability: atomic writes', () => {
       mock.restoreAll();
       engine._active = false;
       engine._notifier?.();
+      clearTimeout(engine._maintainerTimer);
+      engine._maintainerWake?.();
       await fs.rm(diskPath, { recursive: true, force: true });
     }
   });
@@ -676,6 +682,8 @@ describe('StoreEngine durability: periodic metadata flush', () => {
     // simulate a crash: stop the loops without a graceful close()
     engine1._active = false;
     engine1._notifier?.();
+    clearTimeout(engine1._maintainerTimer);
+    engine1._maintainerWake?.();
 
     const engine2 = new Engine({ diskPath });
     await engine2.ready();
@@ -697,6 +705,8 @@ describe('StoreEngine durability: periodic metadata flush', () => {
     await engine1._onMaintainerCycle();
     engine1._active = false;
     engine1._notifier?.();
+    clearTimeout(engine1._maintainerTimer);
+    engine1._maintainerWake?.();
 
     const engine2 = new Engine({ diskPath });
     await engine2.ready();

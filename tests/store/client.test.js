@@ -78,6 +78,7 @@ function makeClient(wsReadyState = 1) {
 function stopClient(client) {
   client._active = false;
   client._notifier?.();
+  clearTimeout(client._idleTimer);
 }
 
 function mockWsSend(ws, dataResolver, delay = 5) {
@@ -117,6 +118,7 @@ describe('StoreClient _send connect-on-demand', () => {
     });
     await client._send('ready');
     assert.strictEqual(ensureCalled, true);
+    stopClient(client);
   });
 
   it('skips _ensureConnected when WS is already OPEN (fast path)', async () => {
@@ -127,6 +129,7 @@ describe('StoreClient _send connect-on-demand', () => {
     });
     await client._send('ready');
     assert.strictEqual(ensureCalled, false);
+    stopClient(client);
   });
 
   it('resets idle timer after successful ws.send()', async () => {

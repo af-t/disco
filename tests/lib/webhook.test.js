@@ -9,6 +9,26 @@ import DiscordWebhookTools from '../../src/lib/webhook.js';
 
 const VALID_URL = 'https://discord.com/api/webhooks/123/abc';
 
+// Advances the faked RETRY_DELAY setTimeout without waiting on it in real time.
+// Each attempt needs two setImmediate flushes (one to reach req.end()/error emit,
+// one more to let the next attempt's request actually start) paired with a timer
+// tick, so this repeats until the awaited promise settles.
+async function drainRetries(promise, maxIterations = 2 * (DiscordWebhookTools.MAX_RETRIES + 1) + 2) {
+  let settled = false;
+  promise.then(
+    () => (settled = true),
+    () => (settled = true),
+  );
+  for (let i = 0; i < maxIterations && !settled; i++) {
+    await new Promise((r) => setImmediate(r));
+    mock.timers.tick(DiscordWebhookTools.RETRY_DELAY);
+  }
+  if (!settled) {
+    await new Promise((r) => setImmediate(r));
+    if (!settled) throw new Error(`drainRetries: promise did not settle after ${maxIterations} iterations`);
+  }
+}
+
 // Helper: build a mock https.request that simulates a full HTTP response
 function makeHttpsMock({ status = 200, body = '{}', headers = {}, errorType = null }) {
   return mock.method(https, 'request', (options, callback) => {
@@ -166,14 +186,21 @@ describe('DiscordWebhookTools sendRawRequest 429 retry', () => {
 
 // ── sendRawRequest: network error retry ──────────────────────────────────────
 describe('DiscordWebhookTools sendRawRequest network error', () => {
-  afterEach(() => mock.restoreAll());
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
 
   it('rejects after MAX_RETRIES network errors', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
     makeHttpsMock({ errorType: 'network' });
-    await assert.rejects(() => new DiscordWebhookTools(VALID_URL).sendMessage('x'), /connection refused/);
+    const rejection = assert.rejects(() => new DiscordWebhookTools(VALID_URL).sendMessage('x'), /connection refused/);
+    await drainRetries(rejection);
+    await rejection;
   });
 
   it('retries on network error and succeeds', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
     createRetryMockRequest.calls = 0;
     mock.method(
       https,
@@ -182,7 +209,9 @@ describe('DiscordWebhookTools sendRawRequest network error', () => {
         setImmediate(() => req.emit('error', new Error('ECONNRESET')));
       }),
     );
-    const result = await new DiscordWebhookTools(VALID_URL).sendMessage('x');
+    const promise = new DiscordWebhookTools(VALID_URL).sendMessage('x');
+    await drainRetries(promise);
+    const result = await promise;
     assert.deepStrictEqual(result, {});
     assert.strictEqual(createRetryMockRequest.calls, 2);
   });
@@ -190,11 +219,17 @@ describe('DiscordWebhookTools sendRawRequest network error', () => {
 
 // ── sendRawRequest: timeout retry ────────────────────────────────────────────
 describe('DiscordWebhookTools sendRawRequest timeout', () => {
-  afterEach(() => mock.restoreAll());
+  afterEach(() => {
+    mock.restoreAll();
+    mock.timers.reset();
+  });
 
   it('rejects after MAX_RETRIES timeouts', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
     makeHttpsMock({ errorType: 'timeout' });
-    await assert.rejects(() => new DiscordWebhookTools(VALID_URL).sendMessage('x'), /Request timeout/);
+    const rejection = assert.rejects(() => new DiscordWebhookTools(VALID_URL).sendMessage('x'), /Request timeout/);
+    await drainRetries(rejection);
+    await rejection;
   });
 });
 

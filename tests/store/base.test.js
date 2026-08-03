@@ -444,6 +444,29 @@ describe('StoreBase _startMaintainer', () => {
       realClearTimeout(failsafe);
     }
   });
+
+  it('wakes immediately on _drainAndStopWorker without advancing the clock', async () => {
+    // capture real timers before mock.timers replaces the globals
+    const realSetTimeout = setTimeout;
+    const realClearTimeout = clearTimeout;
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const s = new ConcreteStore();
+    s._active = true;
+
+    const p = s._startMaintainer();
+    await s._drainAndStopWorker(); // must resolve p without a mock.timers.tick()
+
+    // fail loudly (not hang) if the maintainer loop never wakes early
+    let failsafe;
+    const guard = new Promise((_, rej) => {
+      failsafe = realSetTimeout(() => rej(new Error('maintainer did not wake early')), 1000);
+    });
+    try {
+      await Promise.race([p, guard]);
+    } finally {
+      realClearTimeout(failsafe);
+    }
+  });
 });
 
 describe('StoreBase logger integration', () => {

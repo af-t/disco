@@ -23,6 +23,8 @@ export const LOCATION = Object.freeze({ MEMORY: 0, SERVER: 1, DISK: 1 });
 class StoreBase {
   onDelete = null;
   _notifier = null;
+  _maintainerTimer = null;
+  _maintainerWake = null;
   _metadata = new Map();
   _data = new Map();
   _queues = [];
@@ -336,8 +338,11 @@ class StoreBase {
   async _startMaintainer() {
     while (this._active) {
       await new Promise((resolve) => {
-        unrefTimeout(resolve, this.maintainInterval);
+        this._maintainerWake = resolve;
+        this._maintainerTimer = unrefTimeout(resolve, this.maintainInterval);
       });
+      this._maintainerTimer = null;
+      this._maintainerWake = null;
       if (!this._active) break;
 
       let cycle = 0;
@@ -434,6 +439,8 @@ class StoreBase {
   async _drainAndStopWorker() {
     this._active = false;
     this._notifier?.(); // wake a sleeping worker so it can exit
+    clearTimeout(this._maintainerTimer);
+    this._maintainerWake?.(); // wake a sleeping maintainer so it can exit
     if (this._workerLoop) {
       try {
         await this._workerLoop;

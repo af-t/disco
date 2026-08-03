@@ -49,6 +49,8 @@ mock.module('ws', {
 
 await import('../../src/store/server.js');
 
+const openConnections = [];
+
 function connect() {
   const listeners = new Map();
   const ws = {
@@ -60,10 +62,13 @@ function connect() {
     send(payload) {
       this.sent.push(deserialize(payload));
     },
-    close() {},
+    close() {
+      listeners.get('close')?.();
+    },
   };
   const req = { socket: { remoteAddress: `test-${Math.random()}`, setNoDelay() {} } };
   connectionHandler(ws, req);
+  openConnections.push(ws);
   return { ws, message: listeners.get('message') };
 }
 
@@ -114,4 +119,7 @@ it('documents STORE_SERVER_URL with a WebSocket URL', async () => {
   assert.doesNotMatch(readme, /`STORE_SERVER_URL`\s+\| No\s+\| `https?:\/\//);
 });
 
-after(() => shutdownHandler?.());
+after(async () => {
+  openConnections.forEach((ws) => ws.close());
+  await shutdownHandler?.();
+});
