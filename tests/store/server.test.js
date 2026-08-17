@@ -2,6 +2,7 @@ import { after, describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { deserialize } from 'node:v8';
+import { mockExports } from '../module_mock.js';
 
 let connectionHandler;
 let shutdownHandler;
@@ -21,9 +22,10 @@ class FakeEngine {
   }
 }
 
-mock.module('../../src/store/engine.js', { exports: { default: FakeEngine } });
-mock.module('node:http', {
-  exports: {
+mock.module('../../src/store/engine.js', mockExports({ default: FakeEngine }));
+mock.module(
+  'node:http',
+  mockExports({
     createServer() {
       return {
         listen() {},
@@ -33,10 +35,11 @@ mock.module('node:http', {
         },
       };
     },
-  },
-});
-mock.module('ws', {
-  exports: {
+  }),
+);
+mock.module(
+  'ws',
+  mockExports({
     WebSocketServer: class {
       constructor() {}
 
@@ -44,8 +47,8 @@ mock.module('ws', {
         if (event === 'connection') connectionHandler = handler;
       }
     },
-  },
-});
+  }),
+);
 
 await import('../../src/store/server.js');
 

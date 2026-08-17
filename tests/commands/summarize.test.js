@@ -1,5 +1,6 @@
 import { describe, it, mock, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { mockExports } from '../module_mock.js';
 
 const CHANNEL_ID = '200000000000000001';
 const USER_ID = '100000000000000001';
@@ -50,11 +51,7 @@ describe('summarize command', () => {
       return agent;
     };
 
-    await mock.module('@af-t/agent-sdk', {
-      exports: {
-        default: mockAgentCreator,
-      },
-    });
+    await mock.module('@af-t/agent-sdk', mockExports({ default: mockAgentCreator }));
 
     const { default: summarize } = await import('../../src/commands/utils/summarize.js');
 
