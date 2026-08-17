@@ -41,9 +41,6 @@ describe('summarize command', () => {
   it('creates a fresh agent per invocation, not a shared module-level singleton', async () => {
     const createdAgents = [];
 
-    const [major, minor] = process.versions.node.split('.').map(Number);
-    const useExports = major > 25 || (major === 25 && minor >= 9);
-
     const mockAgentCreator = async () => {
       const agent = {
         messages: [],
@@ -53,17 +50,11 @@ describe('summarize command', () => {
       return agent;
     };
 
-    if (useExports) {
-      await mock.module('@af-t/agent-sdk', {
-        exports: {
-          default: mockAgentCreator,
-        },
-      });
-    } else {
-      await mock.module('@af-t/agent-sdk', {
-        defaultExport: mockAgentCreator,
-      });
-    }
+    await mock.module('@af-t/agent-sdk', {
+      exports: {
+        default: mockAgentCreator,
+      },
+    });
 
     const { default: summarize } = await import('../../src/commands/utils/summarize.js');
 
