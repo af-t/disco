@@ -32,7 +32,9 @@ export function buildSystemPrompt({ botUsername }) {
     '- discord_read if you need full content of a referenced message not in buffer',
     '- discord_get_user / discord_get_channel / discord_get_guild / discord_get_role / discord_get_thread / discord_fetch_history for inspection',
     '- To skip: produce no tool call, and write strictly "SKIP" (or output nothing).',
-    '- CRITICAL: Plain assistant text responses (replies without tool calls) are completely ignored and hidden from the user. If you want to say something to a user, you MUST call discord_reply or discord_send. Never try to talk to the user using plain assistant text.',
+    '- CRITICAL: Plain assistant text responses (replies without tool calls) are completely ignored and ' +
+      'hidden from the user. If you want to say something to a user, you MUST call discord_reply or ' +
+      'discord_send. Never try to talk to the user using plain assistant text.',
     '',
     'CAPABILITIES',
     '- Enrich replies with discord_send_embed (structured info), discord_send_sticker, discord_send_media (GIF/file), and custom emoji in text via <:name:id>.',
@@ -41,7 +43,8 @@ export function buildSystemPrompt({ botUsername }) {
     'MODERATION POLICY',
     '- You may NEVER moderate on your own judgement. No proactive muting, deleting, kicking, banning, or guild edits.',
     '- Moderation/guild tools run ONLY when an admin or mod explicitly instructs the action in chat.',
-    '- For every such tool you MUST pass authorizing_message_id = the id of the new message in which the admin just gave that instruction this turn, not an older message from earlier context.',
+    '- For every such tool you MUST pass authorizing_message_id = the id of the new message in which the ' +
+      'admin just gave that instruction this turn, not an older message from earlier context.',
     '- If no admin asked, refuse and say you only take moderation actions on an admin instruction.',
     '- The system independently verifies the instruction author actually holds the required permission; you cannot bypass it, so do not try.',
     '',
@@ -50,7 +53,8 @@ export function buildSystemPrompt({ botUsername }) {
     "- Don't @-mention every user. Reply to address; mention only when calling out.",
     "- Don't reply to your own messages (your name appears as author in buffer; recognize it).",
     "- Don't inspect for fun. Only when inspection changes your response.",
-    '- All public responses MUST be sent via discord_reply or discord_send. Any plain text response that does not invoke a tool will be treated as skip/reasoning and will be hidden.',
+    '- All public responses MUST be sent via discord_reply or discord_send. Any plain text response that ' +
+      'does not invoke a tool will be treated as skip/reasoning and will be hidden.',
   ].join('\n');
 }
 
@@ -67,6 +71,7 @@ export function buildCommandSystemPrompt({ botUsername, userTag }) {
     `You are ${botUsername}, responding to a direct command invocation from user ${userTag}.`,
     `Skipping is not an option — the user has explicitly asked for your response.`,
     `Same identity guard, same tools as in normal channel mode. Use discord_reply or discord_send to respond.`,
-    `Image attachments arrive inline as multimodal blocks. Non-image attachments are saved to disk and listed under "[Workspace files ...]" — read them via the Read tool.`,
+    `Image attachments arrive inline as multimodal blocks. Non-image attachments are saved to disk and ` +
+      `listed under "[Workspace files ...]" — read them via the Read tool.`,
   ].join('\n');
 }

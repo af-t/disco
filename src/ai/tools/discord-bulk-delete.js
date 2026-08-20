@@ -16,7 +16,8 @@ function ageMs(id) {
 export const definition = {
   name: 'discord_bulk_delete',
   description:
-    'Bulk-delete 2 to 100 recent messages (younger than 14 days) in this channel. Moderation action requiring MANAGE_MESSAGES; pass the admin instruction as authorizing_message_id.',
+    'Bulk-delete 2 to 100 recent messages (younger than 14 days) in this channel. Moderation action ' +
+    'requiring MANAGE_MESSAGES; pass the admin instruction as authorizing_message_id.',
   inputSchema: {
     type: 'object',
     properties: {

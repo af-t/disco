@@ -7,7 +7,8 @@ const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 export const definition = {
   name: 'discord_timeout_member',
   description:
-    'Time out (mute) a member so they cannot chat or speak, for a duration. Moderation action requiring MODERATE_MEMBERS; pass the admin instruction as authorizing_message_id.',
+    'Time out (mute) a member so they cannot chat or speak, for a duration. Moderation action requiring ' +
+    'MODERATE_MEMBERS; pass the admin instruction as authorizing_message_id.',
   inputSchema: {
     type: 'object',
     properties: {

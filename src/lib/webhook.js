@@ -91,7 +91,8 @@ class DiscordWebhookTools {
    * @param {Object} data - The payload to send.
    * @param {Object} [options={}] - Additional request options.  Can include `path`, `method`, and `headers`.
    * @param {number} [retryCount=0] - The current retry count.
-   * @returns {Promise<Object|string>} The response data, parsed as JSON if possible, or the raw string if parsing fails.
+   * @returns {Promise<Object|string>} The response data, parsed as JSON if possible, or the raw string
+   *   if parsing fails.
    * @throws {Error} If the request fails after multiple retries or the response is too large.
    */
   async sendRawRequest(data, options = {}, retryCount = 0) {

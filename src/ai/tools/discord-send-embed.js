@@ -3,7 +3,8 @@ import { channelScopeError } from './scope.js';
 export const definition = {
   name: 'discord_send_embed',
   description:
-    'Send a rich embed (title, description, fields, color, image, thumbnail, footer) to a channel, optionally with leading text. Use for structured or visually distinct messages.',
+    'Send a rich embed (title, description, fields, color, image, thumbnail, footer) to a channel, ' +
+    'optionally with leading text. Use for structured or visually distinct messages.',
   inputSchema: {
     type: 'object',
     properties: {

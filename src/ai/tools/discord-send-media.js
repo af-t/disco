@@ -3,7 +3,9 @@ import { channelScopeError, scopedMediaPath } from './scope.js';
 export const definition = {
   name: 'discord_send_media',
   description:
-    'Send a GIF, image, or file to a channel by direct media URL or local path (uploaded as an attachment). Optionally include text. For a Tenor/Giphy share link that should unfurl, use discord_send with the link in the content instead.',
+    'Send a GIF, image, or file to a channel by direct media URL or local path (uploaded as an ' +
+    'attachment). Optionally include text. For a Tenor/Giphy share link that should unfurl, use ' +
+    'discord_send with the link in the content instead.',
   inputSchema: {
     type: 'object',
     properties: {

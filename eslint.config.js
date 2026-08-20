@@ -46,6 +46,15 @@ export default [
 
       // Allow empty catch blocks when intentional
       'no-empty': ['warn', { allowEmptyCatch: true }],
+
+      'max-len': [
+        'error',
+        {
+          code: 170,
+          comments: 120,
+          ignoreUrls: true,
+        },
+      ],
     },
   },
 

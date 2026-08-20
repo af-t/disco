@@ -47,7 +47,9 @@ const execute = async (client, message, args, _rawArgs) => {
       const prompt = [
         {
           type: 'text',
-          text: 'Please provide a clear and concise summary of the following conversation. Highlight the key points discussed and refer to any shared images or files if they are important.',
+          text:
+            'Please provide a clear and concise summary of the following conversation. Highlight the key ' +
+            'points discussed and refer to any shared images or files if they are important.',
         },
       ];
 

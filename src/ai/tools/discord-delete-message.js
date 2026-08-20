@@ -4,7 +4,8 @@ import { authorize } from './authorize.js';
 export const definition = {
   name: 'discord_delete_message',
   description:
-    'Delete a single message in this channel. Moderation action: only valid when an admin/mod with MANAGE_MESSAGES instructed it in chat; pass their instruction id as authorizing_message_id.',
+    'Delete a single message in this channel. Moderation action: only valid when an admin/mod with ' +
+    'MANAGE_MESSAGES instructed it in chat; pass their instruction id as authorizing_message_id.',
   inputSchema: {
     type: 'object',
     properties: {

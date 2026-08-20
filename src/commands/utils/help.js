@@ -12,7 +12,10 @@ const execute = async (client, message, args) => {
 
     const embed = {
       title: `Command: ${command.name}`,
-      description: `**Usage:** \`${prefix}${command.usage || command.name}\`\n**Aliases:** ${command.aliases?.join(', ') || 'None'}\n**Permissions:** ${command.permissions?.join(', ') || 'None'}`,
+      description:
+        `**Usage:** \`${prefix}${command.usage || command.name}\`\n` +
+        `**Aliases:** ${command.aliases?.join(', ') || 'None'}\n` +
+        `**Permissions:** ${command.permissions?.join(', ') || 'None'}`,
       color: 0x00ae86,
     };
 
