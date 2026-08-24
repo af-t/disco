@@ -109,6 +109,7 @@ wss.on('connection', (ws, req) => {
 server.listen(process.env.STORE_SERVER_PORT || 3000);
 ['SIGTERM', 'SIGINT'].forEach((sig) =>
   process.on(sig, async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2500)); // wait 2.5 sec before shutdown
     await store?.close?.();
     for (const [ip, socket] of requestLog.entries()) {
       socket.destroy();
