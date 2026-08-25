@@ -1,4 +1,5 @@
 import Engine from './engine.js';
+import { createSignalHandler } from './shutdown.js';
 import util from '../lib/utility.js';
 import { serialize } from 'node:v8';
 import { WebSocketServer } from 'ws';
@@ -107,15 +108,9 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(process.env.STORE_SERVER_PORT || 3000);
-['SIGTERM', 'SIGINT'].forEach((sig) =>
-  process.on(sig, async () => {
-    await new Promise((resolve) => setTimeout(resolve, 2500)); // wait 2.5 sec before shutdown
-    await store?.close?.();
-    for (const [ip, socket] of requestLog.entries()) {
-      socket.destroy();
-      requestLog.delete(ip);
-    }
-
-    server.close();
-  }),
-);
+const handleSignal = createSignalHandler({
+  getStore: () => store,
+  requestLog,
+  closeServer: () => server.close(),
+});
+['SIGTERM', 'SIGINT'].forEach((sig) => process.on(sig, handleSignal));

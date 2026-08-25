@@ -62,6 +62,7 @@ A modular and extendable Discord bot built with Node.js, designed for server man
    | `SPOTIFY_CLIENT_SECRET` | No     | —                                | Spotify API client secret |
    | `TAVILY_API_KEY`      | No       | —                                | Tavily API key (for web-search tool in AI agents) |
    | `STORE_DATA_PATH`     | No       | `./storage/db`                   | Server-side disk path for the store database |
+   | `STORE_SHUTDOWN_DRAIN_MS` | No   | `3000`                           | How long the store server waits for clients to flush and disconnect before persisting on SIGTERM/SIGINT |
    | `OPENROUTER_ORDER`    | No       | —                                | Comma-separated provider priority order |
    | `OPENROUTER_ONLY`     | No       | —                                | Restrict inference to specific providers only |
    | `OPENROUTER_MAX_COMPLETION_TOKENS` | No | model default              | Max output tokens per agent turn |
