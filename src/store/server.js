@@ -28,7 +28,7 @@ wss.on('connection', (ws, req) => {
   requestLog.set(clientIp, req.socket);
 
   req.socket.setNoDelay(true);
-  ws._socket.setNoDelay(true);
+  ws._socket?.setNoDelay?.(true);
 
   // Close connection after 5 minutes of silence
   const IDLE_TIMEOUT_MS = 300_000;
