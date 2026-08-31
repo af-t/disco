@@ -14,7 +14,7 @@ export const ACTION = Object.freeze({
   ATTR_SET: 6,
   ATTR_GET: 7,
 });
-export const LOCATION = Object.freeze({ MEMORY: 0, SERVER: 1, DISK: 1 });
+export const LOCATION = Object.freeze({ MEMORY: 0, SERVER: 1, DISK: 2 });
 
 /**
  * Abstract base class for StoreManager and StoreClient.
@@ -274,7 +274,7 @@ class StoreBase {
 
   _updateMemoryMeta(key, data, meta, customTTL) {
     meta.accessCount = 0;
-    meta.location = 0; // LOCATION.MEMORY
+    meta.location = LOCATION.MEMORY;
     if (customTTL !== null) {
       meta.customTTL = customTTL;
       meta.expired = Date.now() + customTTL;
@@ -366,8 +366,7 @@ class StoreBase {
           const m = self._metadata.get(key);
 
           if (Date.now() > m.expired) {
-            if (m.location === 0) {
-              // MEMORY
+            if (m.location === LOCATION.MEMORY) {
               await self._demote(key);
             } else {
               await self._delete(key);
@@ -375,14 +374,14 @@ class StoreBase {
             continue;
           }
 
-          if (m.location === 0 && m.dataSizeV8 > 0) {
+          if (m.location === LOCATION.MEMORY && m.dataSizeV8 > 0) {
             memTotal += m.dataSizeV8;
           }
         }
 
         if (memTotal > self.maxMemory) {
           const candidates = Array.from(self._metadata.entries())
-            .filter(([, m]) => m.location === 0 && m.dataSizeV8 > 0)
+            .filter(([, m]) => m.location === LOCATION.MEMORY && m.dataSizeV8 > 0)
             .sort(([, a], [, b]) => a.lastAccess - b.lastAccess)
             .slice(0, Math.ceil(self._metadata.size * 0.2));
 

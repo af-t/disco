@@ -20,6 +20,9 @@ class StoreManager extends StoreBase {
 
     this.diskTTL = this._validateInt(config.diskTTL) ?? 1_200_000;
     this.diskPath = config.diskPath || join(process.cwd(), 'storage', 'db');
+    this._seq = 0;
+    this._invalidationLog = [];
+    this._maxLogSize = 2000;
   }
 
   async ready() {
@@ -78,6 +81,28 @@ class StoreManager extends StoreBase {
     return stats;
   }
 
+  _recordInvalidation(key, op) {
+    this._seq += 1;
+    const entry = { seq: this._seq, key, op, ts: Date.now() };
+    this._invalidationLog.push(entry);
+    if (this._invalidationLog.length > this._maxLogSize) this._invalidationLog.shift();
+    this._dirty = true;
+    return entry;
+  }
+
+  getInvalidations(sinceSeq) {
+    const since = Number(sinceSeq) || 0;
+    if (since >= this._seq) return { currentSeq: this._seq, entries: [] };
+    if (since < this._seq - this._invalidationLog.length) {
+      return { currentSeq: this._seq, entries: [...this._invalidationLog], gap: true };
+    }
+    return { currentSeq: this._seq, entries: this._invalidationLog.filter((e) => e.seq > since) };
+  }
+
+  getCurrentSeq() {
+    return this._seq;
+  }
+
   // --- Task factory (engine-specific: disk I/O) ---
 
   /**
@@ -93,6 +118,7 @@ class StoreManager extends StoreBase {
       case ACTION.CLEAR:
         return async () => {
           await this._executeClear();
+          this._recordInvalidation('*', 'clear');
           this._dirty = true;
           if (this.diskPath) {
             await fs.rm(this.diskPath, { force: true, recursive: true });
@@ -103,7 +129,8 @@ class StoreManager extends StoreBase {
       case ACTION.SET:
         return async () => {
           const isCache = typeof options === 'boolean' ? options : !!options?.isCache;
-          const customTTL = typeof options === 'object' ? options?.ttl : null;
+          const rawTTL = typeof options === 'object' ? options?.ttl : null;
+          const customTTL = rawTTL === undefined ? null : rawTTL;
 
           const existing = this._metadata.get(key);
           const meta = existing ?? {
@@ -117,13 +144,26 @@ class StoreManager extends StoreBase {
             expired: customTTL ? Date.now() + customTTL : Date.now() + this.memoryTTL,
           };
 
-          if (meta.location === LOCATION.DISK) {
+          // keep isCache in sync on re-set
+          meta.isCache = !!isCache;
+
+          if (meta.location === LOCATION.DISK && meta.locationFile) {
             try {
               await fs.rm(meta.locationFile);
             } catch {}
+            meta.locationFile = null;
           }
           if (this._updateMemoryMeta(key, data, meta, customTTL)) {
+            if (meta.isCache) {
+              const baseTTL = meta.customTTL ?? this.memoryTTL;
+              meta.expired = Date.now() + baseTTL + this.diskTTL;
+              this._metadata.set(key, meta);
+            }
+            this._recordInvalidation(key, 'set');
             this._dirty = true;
+            if (!meta.isCache) {
+              await this._demote(key);
+            }
           }
         };
 
@@ -169,16 +209,19 @@ class StoreManager extends StoreBase {
             try {
               const raw = await fs.readFile(meta.locationFile);
               const value = deserialize(raw);
-              meta.location = LOCATION.MEMORY;
-              meta.expired = meta.customTTL ? Date.now() + meta.customTTL : Date.now() + this.memoryTTL;
+              const memMeta = {
+                ...meta,
+                location: LOCATION.MEMORY,
+                expired: meta.customTTL ? Date.now() + meta.customTTL : Date.now() + this.memoryTTL,
+                lastAccess: Date.now(),
+                accessCount: (meta.accessCount || 0) + 1,
+              };
+              try {
+                memMeta.dataSizeV8 = serialize(value).length;
+              } catch {}
               this._data.set(key, value);
-              this._metadata.set(key, meta);
+              this._metadata.set(key, memMeta);
               this._dirty = true;
-              await fs
-                .rm(meta.locationFile)
-                .catch((err) =>
-                  this._log('debug', 'cleanup: failed to remove disk file', meta.locationFile, err?.message),
-                );
               this._stats.cache.hits++;
               return value;
             } catch (err) {
@@ -189,8 +232,13 @@ class StoreManager extends StoreBase {
             }
           }
 
-          // Memory hit — refresh sliding TTL
-          meta.expired = meta.customTTL ? Date.now() + meta.customTTL : Date.now() + this.memoryTTL;
+          // Memory hit — refresh TTL
+          if (meta.isCache) {
+            const baseTTL = meta.customTTL ?? this.memoryTTL;
+            meta.expired = Date.now() + baseTTL + this.diskTTL;
+          } else {
+            meta.expired = meta.customTTL ? Date.now() + meta.customTTL : Infinity;
+          }
           this._metadata.set(key, meta);
           this._dirty = true;
           this._stats.cache.hits++;
@@ -215,7 +263,7 @@ class StoreManager extends StoreBase {
   // --- Backend-specific delete ---
 
   async _deleteFromBackend(_key, meta) {
-    if (meta.location === LOCATION.DISK && meta.locationFile) {
+    if (meta.locationFile) {
       try {
         await fs.rm(meta.locationFile);
       } catch {
@@ -224,11 +272,19 @@ class StoreManager extends StoreBase {
     }
   }
 
+  async _delete(key) {
+    const had = this._metadata.has(key);
+    await super._delete(key);
+    if (had) this._recordInvalidation(key, 'delete');
+  }
+
   // --- Demote (memory → disk) ---
 
   async _demote(key) {
     const meta = this._metadata.get(key);
     if (!meta || meta.dataSizeV8 < 1) return;
+    if (meta.location !== LOCATION.MEMORY) return;
+    if (!this._data.has(key)) return;
 
     if (!meta.locationFile) meta.locationFile = this._getLocation(key);
 
@@ -272,19 +328,40 @@ class StoreManager extends StoreBase {
 
     try {
       const data = await fs.readFile(metadataPath);
-      this._metadata = deserialize(data);
+      const loaded = deserialize(data);
+      if (loaded instanceof Map) {
+        this._metadata = loaded;
+      } else if (loaded && loaded.metadata instanceof Map) {
+        this._metadata = loaded.metadata;
+        this._seq = Number(loaded.seq) || 0;
+        this._invalidationLog = Array.isArray(loaded.log) ? loaded.log : [];
+      } else {
+        this._metadata = new Map();
+      }
 
-      // memory-resident entries have no on-disk data after a crash;
-      // drop them so has()/get() stay consistent
       let dropped = 0;
+      let restored = 0;
       for (const [key, meta] of this._metadata) {
         if (meta.location === LOCATION.MEMORY) {
-          this._metadata.delete(key);
-          dropped++;
+          if (meta.locationFile && fsSync.existsSync(meta.locationFile)) {
+            meta.location = LOCATION.DISK;
+            meta.expired = meta.customTTL
+              ? Date.now() + meta.customTTL
+              : meta.isCache
+                ? Date.now() + this.diskTTL
+                : Infinity;
+            restored++;
+          } else {
+            this._metadata.delete(key);
+            dropped++;
+          }
         }
       }
-      this._dirty = dropped > 0;
-      this._log('info', 'metadata loaded from disk', dropped ? `(dropped ${dropped} volatile entries)` : '');
+      this._dirty = dropped > 0 || restored > 0;
+      const msg = [dropped ? `dropped ${dropped} volatile` : '', restored ? `restored ${restored} disk copies` : '']
+        .filter(Boolean)
+        .join(', ');
+      this._log('info', 'metadata loaded from disk', msg ? `(${msg})` : '');
     } catch (err) {
       this._log('error', 'metadata load failed', err);
     }
@@ -299,7 +376,8 @@ class StoreManager extends StoreBase {
     if (!this.diskPath) return;
     if (!this._dirty) return;
     try {
-      const data = serialize(this._metadata);
+      const payload = { metadata: this._metadata, seq: this._seq, log: this._invalidationLog };
+      const data = serialize(payload);
       await this._atomicWrite(join(this.diskPath, 'metadata.dat'), data);
       this._dirty = false;
       this._log('debug', 'metadata saved');

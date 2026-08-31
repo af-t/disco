@@ -90,12 +90,30 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
+    if (op === 'sync') {
+      const [sinceSeq] = args;
+      const result = store.getInvalidations(sinceSeq);
+      ws.send(serialize({ id, data: result }));
+      return;
+    }
+
     if (op in store && typeof store[op] === 'function') {
       let data;
       try {
         data = await store[op](...args);
       } finally {
         ws.send(serialize({ id, data }));
+      }
+      if (op === 'set' || op === 'delete' || op === 'clear') {
+        try {
+          const seq = store.getCurrentSeq?.() ?? 0;
+          const key = op === 'clear' ? '*' : args[0];
+          const entries = [{ seq, key, op }];
+          const payload = serialize({ op: 'invalidate', entries });
+          for (const client of wss.clients) {
+            if (client !== ws && client.readyState === 1) client.send(payload);
+          }
+        } catch {}
       }
       return;
     }
