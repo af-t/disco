@@ -53,9 +53,9 @@ test('StoreManager (Engine) should return metadata and stats', async () => {
   await engine.ready();
 
   try {
-    await engine.set('meta', 'data');
+    await engine.set('meta', 'data', { isCache: true });
     const meta = await engine.metadata('meta');
-    assert.strictEqual(meta.location, 0); // LOCATION.MEMORY
+    assert.strictEqual(meta.location, 0); // LOCATION.MEMORY (cache stays in memory with extended TTL)
     assert.ok(meta.created > 0);
 
     const stats = await engine.getStats();
@@ -184,10 +184,10 @@ describe('StoreEngine disk demote + get promotion', () => {
     const engine = new Engine({ diskPath });
     await engine.ready();
     try {
-      await engine.set('dkey', { val: 42 });
+      await engine.set('dkey', { val: 42 }, { isCache: true });
       // Manually demote to disk
       await engine._demote('dkey');
-      assert.strictEqual(engine._metadata.get('dkey').location, 1); // DISK
+      assert.strictEqual(engine._metadata.get('dkey').location, 2); // DISK
       // get() should promote back to memory
       const result = await engine.get('dkey');
       assert.deepStrictEqual(result, { val: 42 });
@@ -203,10 +203,10 @@ describe('StoreEngine disk demote + get promotion', () => {
     const engine = new Engine({ diskPath });
     await engine.ready();
     try {
-      await engine.set('k', 'v');
+      await engine.set('k', 'v', { isCache: true });
       await engine._demote('k');
       const meta = engine._metadata.get('k');
-      assert.strictEqual(meta.location, 1); // DISK
+      assert.strictEqual(meta.location, 2); // DISK
       await engine._deleteFromBackend('k', meta);
       // file should be gone now
       await assert.rejects(() => fs.access(meta.locationFile), /ENOENT/);
@@ -221,8 +221,8 @@ describe('StoreEngine disk demote + get promotion', () => {
     const engine = new Engine({ diskPath });
     await engine.ready();
     try {
-      await engine.set('mem', 'v');
-      await engine.set('disk', 'v2');
+      await engine.set('mem', 'v', { isCache: true });
+      await engine.set('disk', 'v2', { isCache: true });
       await engine._demote('disk');
       const stats = await engine.getStats();
       assert.strictEqual(stats.storage.itemsInMemory, 1);
@@ -238,7 +238,7 @@ async function setupEngineWithWriteError(prefix) {
   const diskPath = join(os.tmpdir(), prefix + '_' + Date.now());
   const engine = new Engine({ diskPath });
   await engine.ready();
-  await engine.set('k', 'v');
+  await engine.set('k', 'v', { isCache: true });
   mock.method(fs, 'writeFile', async () => {
     throw new Error('disk full');
   });
@@ -273,12 +273,12 @@ describe('StoreEngine SET re-sets key previously on DISK', () => {
     const engine = new Engine({ diskPath });
     await engine.ready();
     try {
-      await engine.set('k', 'v1');
+      await engine.set('k', 'v1', { isCache: true });
       await engine._demote('k');
       const meta = engine._metadata.get('k');
       const locationFile = meta.locationFile;
-      // Re-set the same key (triggers stale disk file cleanup)
-      await engine.set('k', 'v2');
+      // Re-set same key as cache (stays in memory, old disk file cleaned)
+      await engine.set('k', 'v2', { isCache: true });
       assert.strictEqual(engine._metadata.get('k').location, 0); // MEMORY
       assert.strictEqual(await engine.get('k'), 'v2');
       await assert.rejects(() => fs.stat(locationFile), 'stale disk file should be removed');
@@ -350,7 +350,7 @@ describe('StoreEngine SET disk cleanup failure is swallowed', () => {
     const engine = new Engine({ diskPath });
     await engine.ready();
     try {
-      await engine.set('k', 'v1');
+      await engine.set('k', 'v1', { isCache: true });
       await engine._demote('k');
       // patch fs.rm to throw only for .dat files
       const origRm = fs.rm.bind(fs);
@@ -358,7 +358,7 @@ describe('StoreEngine SET disk cleanup failure is swallowed', () => {
         if (typeof p === 'string' && p.endsWith('.dat')) throw new Error('rm failed');
         return origRm(p, ...args);
       });
-      await engine.set('k', 'v2'); // should not throw even if rm fails
+      await engine.set('k', 'v2', { isCache: true }); // should not throw even if rm fails
       assert.strictEqual(engine._metadata.get('k').location, 0); // MEMORY
       assert.strictEqual(await engine.get('k'), 'v2');
     } finally {
@@ -375,7 +375,7 @@ describe('StoreEngine GET disk file path recovery', () => {
     const engine = new Engine({ diskPath });
     await engine.ready();
     try {
-      await engine.set('pkey', { x: 1 });
+      await engine.set('pkey', { x: 1 }, { isCache: true });
       await engine._demote('pkey');
       const meta = engine._metadata.get('pkey');
       // The real file lives at e.g. <diskPath>/ab/cdef....dat
@@ -554,7 +554,7 @@ describe('StoreManager argument and lifecycle guards', () => {
     try {
       await engine.set('ck', { v: 1 }, { isCache: true, ttl: 60_000 });
       await engine._demote('ck');
-      assert.strictEqual(engine._metadata.get('ck').location, 1);
+      assert.strictEqual(engine._metadata.get('ck').location, 2);
       assert.deepStrictEqual(await engine.get('ck'), { v: 1 });
     } finally {
       await engine.close();
@@ -613,7 +613,7 @@ describe('StoreEngine durability: atomic writes', () => {
     const engine = new Engine({ diskPath });
     await engine.ready();
     try {
-      await engine.set('k', { v: 1 });
+      await engine.set('k', { v: 1 }, { isCache: true });
       mock.method(fs, 'rename', async () => {
         throw new Error('rename failed');
       });
@@ -642,7 +642,8 @@ describe('StoreEngine durability: atomic writes', () => {
     try {
       await engine.set('A', 'first');
       await engine._saveMetadata();
-      const good = deserialize(await fs.readFile(join(diskPath, 'metadata.dat')));
+      const goodRaw = deserialize(await fs.readFile(join(diskPath, 'metadata.dat')));
+      const good = goodRaw instanceof Map ? goodRaw : goodRaw.metadata;
       assert.ok(good.has('A'));
 
       mock.method(fs, 'rename', async () => {
@@ -653,7 +654,8 @@ describe('StoreEngine durability: atomic writes', () => {
       await engine._saveMetadata(); // swallows the rename error
 
       // the old file survives the failed write, no torn/partial replacement
-      const after = deserialize(await fs.readFile(join(diskPath, 'metadata.dat')));
+      const afterRaw = deserialize(await fs.readFile(join(diskPath, 'metadata.dat')));
+      const after = afterRaw instanceof Map ? afterRaw : afterRaw.metadata;
       assert.ok(after.has('A'));
       assert.strictEqual(after.has('B'), false);
       const leftovers = (await fs.readdir(diskPath)).filter((f) => f.includes('.tmp'));
@@ -677,8 +679,7 @@ describe('StoreEngine durability: periodic metadata flush', () => {
     const engine1 = new Engine({ diskPath });
     await engine1.ready();
     await engine1.set('persist', 'value', false);
-    await engine1._demote('persist'); // data on disk, metadata only in RAM
-    await engine1._onMaintainerCycle(); // periodic flush persists metadata
+    await engine1._onMaintainerCycle();
     // simulate a crash: stop the loops without a graceful close()
     engine1._active = false;
     engine1._notifier?.();
@@ -699,9 +700,8 @@ describe('StoreEngine durability: periodic metadata flush', () => {
     const diskPath = join(os.tmpdir(), 'engine_prune_' + Date.now());
     const engine1 = new Engine({ diskPath });
     await engine1.ready();
-    await engine1.set('mem', 'in-ram', false); // never demoted, lives only in memory
+    await engine1.set('mem', 'in-ram', { isCache: true });
     await engine1.set('disk', 'on-disk', false);
-    await engine1._demote('disk');
     await engine1._onMaintainerCycle();
     engine1._active = false;
     engine1._notifier?.();

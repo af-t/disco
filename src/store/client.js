@@ -34,6 +34,7 @@ class StoreClient extends StoreBase {
 
     this.serverTTL = this._validateInt(config.serverTTL) ?? 1_200_000;
     this.connectTimeoutMs = this._validateInt(config.connectTimeoutMs) ?? StoreClient.CONNECT_TIMEOUT_MS;
+    this._lastSeq = 0;
   }
 
   async ready() {
@@ -64,7 +65,9 @@ class StoreClient extends StoreBase {
     if (connected) {
       await this._demoteAll();
     } else {
-      const unpersisted = [...this._metadata.values()].filter((m) => m.location === 0 && m.dataSizeV8 > 0).length;
+      const unpersisted = [...this._metadata.values()].filter(
+        (m) => m.location === LOCATION.MEMORY && m.dataSizeV8 > 0,
+      ).length;
       if (unpersisted > 0) {
         this._log('warn', `shutdown: server unreachable, ${unpersisted} items not persisted`);
       }
@@ -144,7 +147,8 @@ class StoreClient extends StoreBase {
       case ACTION.SET:
         return async () => {
           const isCache = typeof options === 'boolean' ? options : !!options?.isCache;
-          const customTTL = typeof options === 'object' && typeof options?.ttl === 'number' ? options.ttl : null;
+          const rawTTL = typeof options === 'object' ? options?.ttl : null;
+          const customTTL = typeof rawTTL === 'number' ? rawTTL : null;
 
           const existing = this._metadata.get(key);
           const meta = existing ?? {
@@ -157,12 +161,21 @@ class StoreClient extends StoreBase {
             dataSizeV8: 0,
             expired: customTTL ? Date.now() + customTTL : Date.now() + this.memoryTTL,
           };
+          meta.isCache = !!isCache;
 
-          this._updateMemoryMeta(key, data, meta, customTTL);
+          if (!this._updateMemoryMeta(key, data, meta, customTTL)) return;
+          const k = key;
+          this._enqueueTask(async () => {
+            await this._flushToServer(k);
+          });
         };
 
       case ACTION.GET:
         return async () => {
+          // sync invalidations before serving L1 (best-effort, short timeout)
+          try {
+            await Promise.race([this._syncInvalidations(), new Promise((r) => setTimeout(r, 500))]);
+          } catch {}
           const meta = this._metadata.get(key);
 
           // Check TTL before refreshing or promoting
@@ -269,6 +282,63 @@ class StoreClient extends StoreBase {
     }
   }
 
+  _applyInvalidations(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return;
+    let maxSeq = this._lastSeq;
+    for (const e of entries) {
+      if (e.seq > maxSeq) maxSeq = e.seq;
+      if (e.op === 'clear' || e.key === '*') {
+        this._metadata.clear();
+        this._data.clear();
+      } else if (this._metadata.has(e.key)) {
+        this._metadata.delete(e.key);
+        this._data.delete(e.key);
+      }
+    }
+    this._lastSeq = maxSeq;
+  }
+
+  async _syncInvalidations() {
+    if (!this._active) return;
+    if (!this._ws || this._ws.readyState !== this._WebSocketImpl.OPEN) {
+      if (!this._reconnect) return;
+      // will attempt to connect via _send, but avoid blocking GET for long
+      // if already not connected, let _send handle timeout bounded
+    }
+    try {
+      const result = await this._send('sync', [this._lastSeq]);
+      if (!result) return;
+      if (result.gap) {
+        this._metadata.clear();
+        this._data.clear();
+        this._lastSeq = result.currentSeq;
+        return;
+      }
+      if (Array.isArray(result.entries) && result.entries.length > 0) {
+        this._applyInvalidations(result.entries);
+        if (result.currentSeq > this._lastSeq) this._lastSeq = result.currentSeq;
+      } else if (typeof result.currentSeq === 'number') {
+        this._lastSeq = result.currentSeq;
+      }
+    } catch {}
+  }
+
+  // --- Flush (memory → server, keep local) ---
+
+  async _flushToServer(key) {
+    const meta = this._metadata.get(key);
+    if (!meta || meta.dataSizeV8 < 1 || meta.location !== LOCATION.MEMORY) return;
+    try {
+      const data = this._data.get(key);
+      const options = { isCache: meta.isCache, ttl: meta.customTTL };
+      await this._send('set', [key, data, options]);
+      this._log('debug', 'flushed to server:', key);
+    } catch (err) {
+      this._stats.errors.serverWrite++;
+      this._log('error', 'failed to flush key', key, err.message);
+    }
+  }
+
   // --- Demote (memory → server) ---
 
   async _demote(key) {
@@ -294,6 +364,14 @@ class StoreClient extends StoreBase {
       this._metadata.set(key, meta);
       this._stats.errors.serverWrite++;
       this._log('error', 'failed to demote key', key, err.message);
+    }
+  }
+
+  async _flushAll() {
+    for (const [key, meta] of this._metadata.entries()) {
+      if (meta.location === LOCATION.MEMORY && meta.dataSizeV8 > 0) {
+        await this._flushToServer(key);
+      }
     }
   }
 
@@ -415,6 +493,7 @@ class StoreClient extends StoreBase {
           delete serverConfig.diskPath;
           await this._send('new', [serverConfig]);
           await this._send('ready');
+          await this._syncInvalidations();
           this._log('info', 'connected to storage server');
         } catch (err) {
           this._log('error', 'failed to initialize server session', err.message);
@@ -440,6 +519,10 @@ class StoreClient extends StoreBase {
         try {
           const buffer = Buffer.from(event.data);
           const response = deserialize(buffer);
+          if (response && response.op === 'invalidate' && Array.isArray(response.entries)) {
+            this._applyInvalidations(response.entries);
+            return;
+          }
           const { id, data } = response;
 
           if (this._pendingRequests.has(id)) {
